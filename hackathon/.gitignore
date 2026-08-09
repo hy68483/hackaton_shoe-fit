@@ -1,0 +1,14 @@
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# AI model weights
+*.pth
+*.pt
+
+# local/generated files
+backend/output/
+backend/tests/assets/private/
