@@ -6,3 +6,6 @@ pydantic-settings
 python-multipart
 opencv-python
 numpy
+torch
+torchvision
+segment-anything
