@@ -1,7 +1,7 @@
 from collections.abc import AsyncGenerator
 
-from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import DeclarativeBase
 
 from app.core.config import settings
 from app.core.exceptions import api_error
@@ -40,7 +40,7 @@ async def create_database_tables() -> None:
     if engine is None:
         return
 
-    from app.models import consent, foot_profile, measurement, user  # noqa: F401
+    from app.models import consent, foot_profile, measurement, product, user  # noqa: F401
 
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
