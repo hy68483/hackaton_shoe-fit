@@ -7,8 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
 from app.core.exceptions import api_error
-from app.schemas.measurements import MeasurementSessionCreate
-from app.services import AuthService, MeasurementSessionService
+from app.schemas.consents import ConsentCreate
+from app.services import AuthService, ConsentService
 
 router = APIRouter()
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -20,10 +20,10 @@ def get_auth_service(
     return AuthService(session)
 
 
-def get_measurement_session_service(
+def get_consent_service(
     session: Annotated[AsyncSession, Depends(get_db_session)],
-) -> MeasurementSessionService:
-    return MeasurementSessionService(session)
+) -> ConsentService:
+    return ConsentService(session)
 
 
 def get_bearer_token(
@@ -45,58 +45,40 @@ async def get_current_user_id(
     return UUID(user.id)
 
 
-@router.post("/sessions", status_code=status.HTTP_201_CREATED)
-async def create_measurement_session(
-    payload: MeasurementSessionCreate,
+@router.post("", status_code=status.HTTP_201_CREATED)
+async def create_consent(
+    payload: ConsentCreate,
     user_id: Annotated[UUID, Depends(get_current_user_id)],
-    measurement_session_service: Annotated[
-        MeasurementSessionService,
-        Depends(get_measurement_session_service),
-    ],
+    consent_service: Annotated[ConsentService, Depends(get_consent_service)],
 ) -> dict[str, object]:
-    measurement_session = await measurement_session_service.create_session(user_id, payload)
+    consent = await consent_service.create_consent(user_id, payload)
+    return {
+        "success": True,
+        "data": consent.model_dump(),
+    }
+
+
+@router.get("/me")
+async def get_my_consent(
+    user_id: Annotated[UUID, Depends(get_current_user_id)],
+    consent_service: Annotated[ConsentService, Depends(get_consent_service)],
+) -> dict[str, object]:
+    consent = await consent_service.get_my_consent(user_id)
+    return {
+        "success": True,
+        "data": consent.model_dump() if consent is not None else None,
+    }
+
+
+@router.delete("")
+async def revoke_my_consent(
+    user_id: Annotated[UUID, Depends(get_current_user_id)],
+    consent_service: Annotated[ConsentService, Depends(get_consent_service)],
+) -> dict[str, object]:
+    revoked = await consent_service.revoke_my_consent(user_id)
     return {
         "success": True,
         "data": {
-            "session_id": measurement_session.session_id,
-            "status": measurement_session.status,
+            "revoked": revoked,
         },
-    }
-
-
-@router.get("/sessions/{session_id}")
-async def get_measurement_session(
-    session_id: UUID,
-    user_id: Annotated[UUID, Depends(get_current_user_id)],
-    measurement_session_service: Annotated[
-        MeasurementSessionService,
-        Depends(get_measurement_session_service),
-    ],
-) -> dict[str, object]:
-    measurement_session = await measurement_session_service.get_session(
-        user_id=user_id,
-        session_id=session_id,
-    )
-    return {
-        "success": True,
-        "data": measurement_session.model_dump(),
-    }
-
-
-@router.delete("/sessions/{session_id}")
-async def discard_measurement_session(
-    session_id: UUID,
-    user_id: Annotated[UUID, Depends(get_current_user_id)],
-    measurement_session_service: Annotated[
-        MeasurementSessionService,
-        Depends(get_measurement_session_service),
-    ],
-) -> dict[str, object]:
-    measurement_session = await measurement_session_service.discard_session(
-        user_id=user_id,
-        session_id=session_id,
-    )
-    return {
-        "success": True,
-        "data": measurement_session.model_dump(),
     }
