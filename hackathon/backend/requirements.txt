@@ -1,9 +1,0 @@
-fastapi
-uvicorn[standard]
-sqlalchemy
-asyncpg
-pydantic-settings
-python-multipart
-opencv-python
-numpy
-bcrypt
