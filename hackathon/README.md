@@ -1,16 +1,16 @@
 # hackaton_shoe-fit
 
-AI와 OpenCV를 활용해 사용자의 발 치수를 측정하고, 신발 모델별 맞춤 사이즈를 추천하는 모바일 웹 기반 쇼핑몰 프로젝트입니다.
+Mobile web shoe shopping project with AI-assisted foot measurement and shoe size recommendation.
 
 ## Backend
 
 Required Python: 3.14.x
 
-FastAPI 백엔드는 `backend/` 디렉토리에 있습니다.
+The FastAPI backend is in `backend/`.
 
-### 가상환경 생성
+### Create Virtual Environment
 
-프로젝트 루트(`hackathon/`) 기준으로 실행합니다.
+Run from the project root (`hackathon/`).
 
 ```powershell
 py -3.14 -m venv .venv
@@ -28,28 +28,28 @@ CMD:
 .venv\Scripts\activate.bat
 ```
 
-### 패키지 설치
+### Install Dependencies
 
 ```powershell
 pip install -r backend/requirements.txt
 ```
 
-### 환경변수 설정
+### Environment Variables
 
-실제 로컬 설정은 `backend/.env`에 작성합니다. `.env`는 커밋하지 않고, 공유용 예시는 `backend/.env.example`만 사용합니다.
+Local settings go in `backend/.env`. Do not commit `.env`; share only `backend/.env.example`.
 
 ```powershell
 copy backend\.env.example backend\.env
 ```
 
-### FastAPI 실행
+### Run FastAPI
 
 ```powershell
 cd backend
 uvicorn app.main:app --reload
 ```
 
-Swagger 문서:
+Swagger:
 
 ```text
 http://127.0.0.1:8000/docs
@@ -61,7 +61,7 @@ Health check:
 curl http://127.0.0.1:8000/api/v1/health
 ```
 
-정상 응답:
+Expected response:
 
 ```json
 {
@@ -72,17 +72,32 @@ curl http://127.0.0.1:8000/api/v1/health
 }
 ```
 
-### 개발용 seed 데이터
+### Seed Development Catalog Data
 
-추천 API를 테스트하려면 브랜드, 상품, 상품 사이즈 데이터가 필요합니다. 아래 명령으로 개발용 샘플 데이터를 넣을 수 있습니다.
+Run this before testing product search or recommendations.
 
 ```powershell
 cd backend
 python scripts/seed_catalog.py
 ```
 
-seed 스크립트는 중복 실행해도 기존 데이터를 재사용합니다.
+The seed script is idempotent. Running it multiple times reuses existing rows.
 
-### AI 개발 메모
+### Run Smoke Test
 
-현재 백엔드에는 SAM/OpenCV 실제 추론 로직을 넣지 않습니다. SAM 모델 weight 파일과 PyTorch 설치는 측정 파이프라인 담당자가 별도 결정 후 추가합니다.
+Start FastAPI first, then run:
+
+```powershell
+cd backend
+python scripts/smoke_test.py
+```
+
+Use a custom API base URL if the server runs on another port:
+
+```powershell
+python scripts/smoke_test.py --base-url http://127.0.0.1:8001/api/v1
+```
+
+### AI Development Note
+
+SAM/OpenCV inference logic is intentionally not implemented in this backend branch. SAM model weights and PyTorch setup should be added later by the measurement pipeline owner.
