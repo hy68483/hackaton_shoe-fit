@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from app.core.config import settings
+
 from .opencv_service import ImageValidationError, MeasurementError, OpenCVService
 from .sam_service import SAMService, SegmentationError
 
@@ -11,7 +13,7 @@ from .sam_service import SAMService, SegmentationError
 class MeasurementService:
     def __init__(self, sam_service: SAMService | None = None, opencv_service: OpenCVService | None = None) -> None:
         # 테스트에서는 가짜 서비스 주입이 가능하고, 기본 실행은 실제 서비스로 구성한다.
-        self.sam_service = sam_service or SAMService()
+        self.sam_service = sam_service or SAMService(model_path=settings.sam_model_path or None)
         self.opencv_service = opencv_service or OpenCVService()
 
     def analyze_foot(self, image: np.ndarray, point_x: int, point_y: int) -> dict[str, float | bool | str]:

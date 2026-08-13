@@ -7,8 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
 from app.core.exceptions import api_error
-from app.schemas.profiles import FootProfileApply
-from app.services import AuthService, ProfileService
+from app.schemas.consents import ConsentCreate
+from app.services import AuthService, ConsentService
 
 router = APIRouter()
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -20,10 +20,10 @@ def get_auth_service(
     return AuthService(session)
 
 
-def get_profile_service(
+def get_consent_service(
     session: Annotated[AsyncSession, Depends(get_db_session)],
-) -> ProfileService:
-    return ProfileService(session)
+) -> ConsentService:
+    return ConsentService(session)
 
 
 def get_bearer_token(
@@ -45,40 +45,40 @@ async def get_current_user_id(
     return UUID(user.id)
 
 
-@router.get("/foot")
-async def get_foot_profile(
+@router.post("", status_code=status.HTTP_201_CREATED)
+async def create_consent(
+    payload: ConsentCreate,
     user_id: Annotated[UUID, Depends(get_current_user_id)],
-    profile_service: Annotated[ProfileService, Depends(get_profile_service)],
+    consent_service: Annotated[ConsentService, Depends(get_consent_service)],
 ) -> dict[str, object]:
-    foot_profile = await profile_service.get_foot_profile(user_id)
+    consent = await consent_service.create_consent(user_id, payload)
     return {
         "success": True,
-        "data": foot_profile.model_dump() if foot_profile is not None else None,
+        "data": consent.model_dump(),
     }
 
 
-@router.put("/foot")
-async def apply_foot_profile(
-    payload: FootProfileApply,
+@router.get("/me")
+async def get_my_consent(
     user_id: Annotated[UUID, Depends(get_current_user_id)],
-    profile_service: Annotated[ProfileService, Depends(get_profile_service)],
+    consent_service: Annotated[ConsentService, Depends(get_consent_service)],
 ) -> dict[str, object]:
-    foot_profile = await profile_service.apply_foot_profile(user_id, payload)
+    consent = await consent_service.get_my_consent(user_id)
     return {
         "success": True,
-        "data": foot_profile.model_dump(),
+        "data": consent.model_dump() if consent is not None else None,
     }
 
 
-@router.delete("/foot", status_code=status.HTTP_200_OK)
-async def delete_foot_profile(
+@router.delete("")
+async def revoke_my_consent(
     user_id: Annotated[UUID, Depends(get_current_user_id)],
-    profile_service: Annotated[ProfileService, Depends(get_profile_service)],
+    consent_service: Annotated[ConsentService, Depends(get_consent_service)],
 ) -> dict[str, object]:
-    deleted = await profile_service.delete_foot_profile(user_id)
+    revoked = await consent_service.revoke_my_consent(user_id)
     return {
         "success": True,
         "data": {
-            "deleted": deleted,
+            "revoked": revoked,
         },
     }

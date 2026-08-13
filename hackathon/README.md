@@ -1,16 +1,18 @@
-# AI 맞춤 신발 사이즈 추천 쇼핑몰
+# hackaton_shoe-fit
+
+Mobile web shoe shopping project with AI-assisted foot measurement and shoe size recommendation.
 
 ## Backend
 
 Required Python: 3.14.x
 
-FastAPI 백엔드는 `backend/` 디렉토리에 있습니다.
+The FastAPI backend is in `backend/`.
 
-### 가상환경 생성
+### Create Virtual Environment
 
-PowerShell 또는 CMD에서 프로젝트 루트 기준으로 실행합니다.
+Run from the project root (`hackathon/`).
 
-```bash
+```powershell
 py -3.14 -m venv .venv
 ```
 
@@ -26,40 +28,40 @@ CMD:
 .venv\Scripts\activate.bat
 ```
 
-### 패키지 설치
+### Install Dependencies
 
-```bash
+```powershell
 pip install -r backend/requirements.txt
 ```
 
-### 환경변수
+### Environment Variables
 
-실제 로컬 설정은 `backend/.env`에 작성합니다. `.env` 파일은 커밋하지 않고, 공유용 예시는 `backend/.env.example`만 사용합니다.
+Local settings go in `backend/.env`. Do not commit `.env`; share only `backend/.env.example`.
 
-```bash
+```powershell
 copy backend\.env.example backend\.env
 ```
 
-### FastAPI 실행
+### Run FastAPI
 
-```bash
+```powershell
 cd backend
 uvicorn app.main:app --reload
 ```
 
-Swagger 문서:
+Swagger:
 
 ```text
 http://127.0.0.1:8000/docs
 ```
 
-헬스 체크:
+Health check:
 
-```bash
+```powershell
 curl http://127.0.0.1:8000/api/v1/health
 ```
 
-정상 응답:
+Expected response:
 
 ```json
 {
@@ -70,6 +72,63 @@ curl http://127.0.0.1:8000/api/v1/health
 }
 ```
 
-### AI 개발 메모
+### Seed Development Catalog Data
 
-이번 초기화 단계에서는 SAM, OpenCV, PyTorch 실제 구현을 포함하지 않습니다. SAM 모델 weight 파일과 PyTorch 설치는 추후 측정 파이프라인 담당자가 모델 및 실행 환경을 확정한 뒤 추가합니다.
+Run this before testing product search or recommendations.
+
+```powershell
+cd backend
+python scripts/seed_catalog.py
+```
+
+The seed script is idempotent. Running it multiple times reuses existing rows.
+
+### Run Smoke Test
+
+Start FastAPI first, then run:
+
+```powershell
+cd backend
+python scripts/smoke_test.py
+```
+
+Use a custom API base URL if the server runs on another port:
+
+```powershell
+python scripts/smoke_test.py --base-url http://127.0.0.1:8001/api/v1
+```
+
+### Promote Admin User
+
+Admin catalog APIs require a user with `role=ADMIN`. Sign up normally first, then run:
+
+```powershell
+cd backend
+python scripts/promote_admin.py --email admin@example.com
+```
+
+After promotion, log in again and use the new access token.
+
+### Foot Measurement Pipeline
+
+The image analysis endpoint uses SAM and OpenCV after image validation. Set
+`SAM_MODEL_PATH` in `backend/.env` to a local SAM checkpoint; model weights must
+not be committed to the repository.
+
+The calibration sheet uses four 40 mm square markers. Their center-to-center
+distances are 90 mm horizontally and 176 mm vertically. The service detects all
+four marker centers, applies a perspective transform with a uniform mm scale,
+segments the foot from the user-selected point, and returns foot length, width,
+and segmentation confidence.
+
+```text
+POST /api/v1/measurements/sessions/{session_id}/analyze
+{
+  "point_x": 1500,
+  "point_y": 2200
+}
+```
+
+Use a barefoot photo where all four markers are visible. A missing marker,
+insufficient brightness, or excessive blur returns a retake reason before SAM
+inference starts.
