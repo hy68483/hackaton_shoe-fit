@@ -98,6 +98,17 @@ Use a custom API base URL if the server runs on another port:
 python scripts/smoke_test.py --base-url http://127.0.0.1:8001/api/v1
 ```
 
+### Promote Admin User
+
+Admin catalog APIs require a user with `role=ADMIN`. Sign up normally first, then run:
+
+```powershell
+cd backend
+python scripts/promote_admin.py --email admin@example.com
+```
+
+After promotion, log in again and use the new access token.
+
 ### AI Development Note
 
 SAM/OpenCV inference logic is intentionally not implemented in this backend branch. SAM model weights and PyTorch setup should be added later by the measurement pipeline owner.
