@@ -40,7 +40,7 @@ async def create_database_tables() -> None:
     if engine is None:
         return
 
-    from app.models import consent, foot_profile, measurement, product, user  # noqa: F401
+    from app.models import consent, foot_profile, measurement, measurement_image, product, user  # noqa: F401
 
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)

@@ -1,14 +1,14 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, File, Form, UploadFile, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
 from app.core.exceptions import api_error
-from app.schemas.measurements import MeasurementSessionCreate
-from app.services import AuthService, MeasurementSessionService
+from app.schemas.measurements import ImageUploadForm, MeasurementSessionCreate
+from app.services import AuthService, MeasurementImageService, MeasurementSessionService
 
 router = APIRouter()
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -24,6 +24,12 @@ def get_measurement_session_service(
     session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> MeasurementSessionService:
     return MeasurementSessionService(session)
+
+
+def get_measurement_image_service(
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> MeasurementImageService:
+    return MeasurementImageService(session)
 
 
 def get_bearer_token(
@@ -99,4 +105,61 @@ async def discard_measurement_session(
     return {
         "success": True,
         "data": measurement_session.model_dump(),
+    }
+
+
+@router.post("/sessions/{session_id}/image")
+async def upload_measurement_image(
+    session_id: UUID,
+    user_id: Annotated[UUID, Depends(get_current_user_id)],
+    measurement_image_service: Annotated[
+        MeasurementImageService,
+        Depends(get_measurement_image_service),
+    ],
+    image: Annotated[UploadFile, File()],
+    client_width: Annotated[int, Form(gt=0)],
+    client_height: Annotated[int, Form(gt=0)],
+    device_orientation: Annotated[str, Form(min_length=1, max_length=30)],
+) -> dict[str, object]:
+    measurement_image = await measurement_image_service.upload_image(
+        user_id=user_id,
+        session_id=session_id,
+        image=image,
+        form=ImageUploadForm(
+            client_width=client_width,
+            client_height=client_height,
+            device_orientation=device_orientation,
+        ),
+    )
+    return {
+        "success": True,
+        "data": measurement_image.model_dump(),
+    }
+
+
+@router.post("/sessions/{session_id}/validate")
+async def validate_measurement_image(
+    session_id: UUID,
+    user_id: Annotated[UUID, Depends(get_current_user_id)],
+    measurement_image_service: Annotated[
+        MeasurementImageService,
+        Depends(get_measurement_image_service),
+    ],
+) -> dict[str, object]:
+    validation = await measurement_image_service.validate_image(
+        user_id=user_id,
+        session_id=session_id,
+    )
+    if not validation.valid:
+        raise api_error(
+            409,
+            "BUSINESS_RULE_VIOLATION",
+            validation.message or "Image quality validation failed.",
+            field="image",
+            details={"reason": validation.reason, "checks": validation.checks.model_dump()},
+        )
+
+    return {
+        "success": True,
+        "data": validation.model_dump(exclude_none=True),
     }
