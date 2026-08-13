@@ -1,3 +1,5 @@
+from datetime import date
+from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy import Select, func, or_, select
@@ -18,6 +20,13 @@ class BrandRepository:
     async def get_by_id(self, brand_id: UUID) -> Brand | None:
         result = await self.session.execute(select(Brand).where(Brand.id == brand_id))
         return result.scalar_one_or_none()
+
+    async def create(self, *, name: str) -> Brand:
+        brand = Brand(name=name)
+        self.session.add(brand)
+        await self.session.commit()
+        await self.session.refresh(brand)
+        return brand
 
 
 class ProductRepository:
@@ -54,6 +63,25 @@ class ProductRepository:
         )
         return result.scalar_one_or_none()
 
+    async def create(
+        self,
+        *,
+        brand_id: UUID,
+        name: str,
+        model_code: str,
+        data_status: str,
+    ) -> Product:
+        product = Product(
+            brand_id=brand_id,
+            name=name,
+            model_code=model_code,
+            data_status=data_status,
+        )
+        self.session.add(product)
+        await self.session.commit()
+        await self.session.refresh(product, attribute_names=["brand"])
+        return product
+
     async def list_sizes(self, product_id: UUID) -> list[ProductSize]:
         result = await self.session.execute(
             select(ProductSize)
@@ -61,6 +89,33 @@ class ProductRepository:
             .order_by(ProductSize.size.asc())
         )
         return list(result.scalars().all())
+
+    async def create_size(
+        self,
+        *,
+        product_id: UUID,
+        size: str,
+        length_mm: Decimal,
+        width_mm: Decimal,
+        material: str | None,
+        fit_type: str | None,
+        source: str | None,
+        measured_at: date | None,
+    ) -> ProductSize:
+        product_size = ProductSize(
+            product_id=product_id,
+            size=size,
+            length_mm=length_mm,
+            width_mm=width_mm,
+            material=material,
+            fit_type=fit_type,
+            source=source,
+            measured_at=measured_at,
+        )
+        self.session.add(product_size)
+        await self.session.commit()
+        await self.session.refresh(product_size)
+        return product_size
 
     async def list_recommendation_candidates(
         self,
