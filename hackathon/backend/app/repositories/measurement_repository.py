@@ -4,7 +4,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Measurement
+from app.models import Measurement, MeasurementImage
 
 
 class MeasurementRepository:
@@ -55,3 +55,49 @@ class MeasurementRepository:
         await self.session.commit()
         await self.session.refresh(measurement)
         return measurement
+
+    async def update_status(
+        self,
+        measurement: Measurement,
+        status: str,
+    ) -> Measurement:
+        measurement.status = status
+        await self.session.commit()
+        await self.session.refresh(measurement)
+        return measurement
+
+    async def create_image(
+        self,
+        *,
+        measurement: Measurement,
+        original_key: str,
+        content_type: str,
+        file_size_bytes: int,
+        client_width: int,
+        client_height: int,
+        device_orientation: str,
+    ) -> MeasurementImage:
+        measurement_image = MeasurementImage(
+            measurement_id=measurement.id,
+            original_key=original_key,
+            content_type=content_type,
+            file_size_bytes=file_size_bytes,
+            client_width=client_width,
+            client_height=client_height,
+            device_orientation=device_orientation,
+        )
+        measurement.status = "IMAGE_UPLOADED"
+        self.session.add(measurement_image)
+        await self.session.commit()
+        await self.session.refresh(measurement)
+        await self.session.refresh(measurement_image)
+        return measurement_image
+
+    async def get_latest_image(self, measurement_id: UUID) -> MeasurementImage | None:
+        result = await self.session.execute(
+            select(MeasurementImage)
+            .where(MeasurementImage.measurement_id == measurement_id)
+            .order_by(MeasurementImage.created_at.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
