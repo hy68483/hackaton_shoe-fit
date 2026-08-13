@@ -22,9 +22,9 @@ class MeasurementError(RuntimeError):
 class MarkerLayout:
     """인쇄된 마커 중심의 실제 물리 배치(mm)다."""
 
-    marker_size_mm: float = 40.0
-    horizontal_center_distance_mm: float = 85.0
-    vertical_center_distance_mm: float = 170.0
+    marker_size_mm: float = 25.0
+    horizontal_center_distance_mm: float = 130.0
+    vertical_center_distance_mm: float = 216.0
 
     def destination_centers(self, pixels_per_mm: float) -> np.ndarray:
         """좌상, 우상, 우하, 좌하 순서의 균일한 축척 좌표를 반환한다."""
@@ -43,7 +43,7 @@ class MarkerLayout:
 
 
 class OpenCVService:
-    """네 개의 40 mm 마커를 사용해 발 사진을 실측 좌표계로 변환한다."""
+    """네 개의 25 mm 마커를 사용해 발 사진을 실측 좌표계로 변환한다."""
 
     # 실제 모바일 촬영본의 검증 결과(18.7~22.0)를 반영한 하한이다.
     # 이보다 낮으면 마커의 방향·외곽선도 안정적으로 식별하기 어렵다.
@@ -78,7 +78,8 @@ class OpenCVService:
 
         gray = self._gray(image)
         # 조명에 따라 완전한 검정이 아니어도 검출할 수 있도록 어두운 영역을 이진화한다.
-        _, binary = cv2.threshold(gray, 105, 255, cv2.THRESH_BINARY_INV)
+        # 낮은 임계값으로 피부·그림자와 검은 마커를 분리한다.
+        _, binary = cv2.threshold(gray, 85, 255, cv2.THRESH_BINARY_INV)
         binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
         contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         image_area = float(image.shape[0] * image.shape[1])
@@ -86,7 +87,7 @@ class OpenCVService:
 
         for contour in contours:
             area = float(cv2.contourArea(contour))
-            if area < image_area * 0.001 or area > image_area * 0.08:
+            if area < image_area * 0.00015 or area > image_area * 0.08:
                 continue
             x, y, width, height = cv2.boundingRect(contour)
             aspect_ratio = width / max(height, 1)
@@ -126,7 +127,7 @@ class OpenCVService:
         ]
 
     def detect_marker_centers(self, image: np.ndarray) -> np.ndarray | None:
-        """사진 속 완전한 네 개의 40 mm 정사각형 마커 중심을 정렬한다.
+        """사진 속 완전한 네 개의 25 mm 정사각형 마커 중심을 정렬한다.
 
         마커가 발이나 다리에 가려지면 중심의 실제 위치를 복원할 수 없으므로
         부분 사각형은 측정 보정에 사용하지 않는다.
@@ -140,7 +141,7 @@ class OpenCVService:
         return self._order_points(centers)
 
     def _marker_scale_is_consistent(self, image: np.ndarray) -> bool:
-        """마커 한 변 40 mm와 중심거리 배치가 사진에서 함께 성립하는지 확인한다."""
+        """마커 한 변 25 mm와 중심거리 배치가 사진에서 함께 성립하는지 확인한다."""
         tag_markers = self._detect_apriltag_markers(image)
         quadrilaterals = [points for _, points in tag_markers] if len(tag_markers) == 4 else self._marker_quadrilaterals(image)
         if len(quadrilaterals) != 4:
@@ -220,7 +221,7 @@ class OpenCVService:
         }
 
     def correct_perspective(self, image: np.ndarray, mask: np.ndarray | None = None) -> dict[str, Any]:
-        """마커 중심 간 실제 거리(가로 85 mm, 세로 170 mm)로 원근을 보정한다."""
+        """마커 중심 간 실제 거리(가로 130 mm, 세로 216 mm)로 원근을 보정한다."""
         source = self.detect_marker_centers(image)
         if source is None:
             raise ImageValidationError("PERSPECTIVE_FAILED")
