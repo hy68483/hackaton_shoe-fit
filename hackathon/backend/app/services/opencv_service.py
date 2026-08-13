@@ -51,6 +51,7 @@ class OpenCVService:
     MIN_BRIGHTNESS = 35.0
     MAX_BRIGHTNESS = 250.0
     PIXELS_PER_MM = 5.0
+    ANKLE_CUTOFF_INSET_MM = 25.0
 
     def __init__(self, marker_layout: MarkerLayout | None = None) -> None:
         self.marker_layout = marker_layout or MarkerLayout()
@@ -242,6 +243,30 @@ class OpenCVService:
             "perspective": bool(checks.get("perspective", False)),
         }
 
+    def _trim_lower_leg_from_mask(
+        self,
+        mask: np.ndarray,
+        transformed_marker_centers: np.ndarray,
+        transformed_negative_point: np.ndarray,
+    ) -> np.ndarray:
+        """마커 행 바깥의 하퇴를 제외하고 발 마스크만 남긴다."""
+        if mask is None or mask.size == 0:
+            return mask
+
+        top_row = (transformed_marker_centers[0] + transformed_marker_centers[1]) / 2
+        bottom_row = (transformed_marker_centers[2] + transformed_marker_centers[3]) / 2
+        leg_row = min((top_row, bottom_row), key=lambda row: np.linalg.norm(row - transformed_negative_point))
+        inset_px = int(round(self.ANKLE_CUTOFF_INSET_MM * self.PIXELS_PER_MM))
+        trimmed = mask.copy()
+        height = trimmed.shape[0]
+        if leg_row[1] < height / 2:
+            cutoff = max(int(round(leg_row[1])) - inset_px, 0)
+            trimmed[:cutoff, :] = 0
+        else:
+            cutoff = min(int(round(leg_row[1])) + inset_px, height)
+            trimmed[cutoff:, :] = 0
+        return trimmed
+
     def correct_perspective(self, image: np.ndarray, mask: np.ndarray | None = None) -> dict[str, Any]:
         """마커 중심 간 실제 거리(가로 130 mm, 세로 216 mm)로 원근을 보정한다."""
         source = self.detect_marker_centers(image)
@@ -266,6 +291,17 @@ class OpenCVService:
             corrected_mask = cv2.warpPerspective(
                 mask.astype(np.uint8), matrix, output_size, flags=cv2.INTER_NEAREST
             )
+            leg_negative_point = self.lower_leg_negative_point(image)
+            if leg_negative_point is not None:
+                transformed_markers = cv2.perspectiveTransform(source.reshape(-1, 1, 2), matrix).reshape(-1, 2)
+                transformed_negative_point = cv2.perspectiveTransform(
+                    np.array([[leg_negative_point]], dtype=np.float32), matrix
+                ).reshape(2)
+                corrected_mask = self._trim_lower_leg_from_mask(
+                    corrected_mask,
+                    transformed_markers,
+                    transformed_negative_point,
+                )
         return {
             "image": corrected,
             "mask": corrected_mask,

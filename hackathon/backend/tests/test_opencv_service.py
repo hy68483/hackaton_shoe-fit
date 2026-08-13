@@ -47,6 +47,19 @@ class OpenCVServiceTests(unittest.TestCase):
 
         self.assertEqual(self.service.lower_leg_negative_point(image), (525, 200))
 
+    def test_removes_only_the_marker_outer_leg_region_from_corrected_mask(self) -> None:
+        mask = np.ones((1_300, 700), dtype=np.uint8)
+        transformed_markers = np.array([[25, 300], [675, 300], [675, 1_100], [25, 1_100]], dtype=np.float32)
+
+        trimmed = self.service._trim_lower_leg_from_mask(
+            mask,
+            transformed_markers,
+            np.array([350, 80], dtype=np.float32),
+        )
+
+        self.assertFalse(trimmed[:175].any())
+        self.assertTrue(trimmed[175:].all())
+
     def test_marker_layout_uses_the_specified_physical_distances(self) -> None:
         destination = self.service.marker_layout.destination_centers(pixels_per_mm=5.0)
 
