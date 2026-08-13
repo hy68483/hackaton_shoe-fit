@@ -4,6 +4,7 @@ from app.services.measurement_image_service import MeasurementImageService
 from app.services.measurement_session_service import MeasurementSessionService
 from app.services.profile_service import ProfileService
 from app.services.product_service import BrandService, ProductService
+from app.services.recommendation_service import RecommendationService
 
 __all__ = [
     "AuthService",
@@ -13,4 +14,5 @@ __all__ = [
     "MeasurementSessionService",
     "ProductService",
     "ProfileService",
+    "RecommendationService",
 ]
