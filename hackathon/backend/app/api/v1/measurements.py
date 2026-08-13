@@ -7,8 +7,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
 from app.core.exceptions import api_error
-from app.schemas.measurements import ImageUploadForm, MeasurementSessionCreate
-from app.services import AuthService, MeasurementImageService, MeasurementSessionService
+from app.schemas.measurements import (
+    ImageUploadForm,
+    MeasurementResultApply,
+    MeasurementSessionCreate,
+)
+from app.services import (
+    AuthService,
+    MeasurementImageService,
+    MeasurementResultService,
+    MeasurementSessionService,
+)
 
 router = APIRouter()
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -30,6 +39,12 @@ def get_measurement_image_service(
     session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> MeasurementImageService:
     return MeasurementImageService(session)
+
+
+def get_measurement_result_service(
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> MeasurementResultService:
+    return MeasurementResultService(session)
 
 
 def get_bearer_token(
@@ -162,4 +177,44 @@ async def validate_measurement_image(
     return {
         "success": True,
         "data": validation.model_dump(exclude_none=True),
+    }
+
+
+@router.post("/sessions/{session_id}/result")
+async def apply_measurement_result(
+    session_id: UUID,
+    payload: MeasurementResultApply,
+    user_id: Annotated[UUID, Depends(get_current_user_id)],
+    measurement_result_service: Annotated[
+        MeasurementResultService,
+        Depends(get_measurement_result_service),
+    ],
+) -> dict[str, object]:
+    result = await measurement_result_service.apply_result(
+        user_id=user_id,
+        session_id=session_id,
+        payload=payload,
+    )
+    return {
+        "success": True,
+        "data": result.model_dump(),
+    }
+
+
+@router.get("/sessions/{session_id}/result")
+async def get_measurement_result(
+    session_id: UUID,
+    user_id: Annotated[UUID, Depends(get_current_user_id)],
+    measurement_result_service: Annotated[
+        MeasurementResultService,
+        Depends(get_measurement_result_service),
+    ],
+) -> dict[str, object]:
+    result = await measurement_result_service.get_result(
+        user_id=user_id,
+        session_id=session_id,
+    )
+    return {
+        "success": True,
+        "data": result.model_dump(),
     }
