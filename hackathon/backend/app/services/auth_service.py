@@ -1,5 +1,3 @@
-#회원가입/로그인 비즈니스 로직
-
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,7 +33,7 @@ class AuthService:
             raise api_error(
                 409,
                 "BUSINESS_RULE_VIOLATION",
-                "이미 사용 중인 이메일입니다.",
+                "Email is already in use.",
                 field="email",
             )
 
@@ -52,7 +50,7 @@ class AuthService:
             raise api_error(
                 401,
                 "UNAUTHORIZED",
-                "이메일 또는 비밀번호가 올바르지 않습니다.",
+                "Email or password is incorrect.",
             )
 
         token_pair = self._create_token_pair(user)
@@ -87,17 +85,17 @@ class AuthService:
     async def get_current_user(self, access_token: str) -> UserRead:
         payload = decode_token(access_token)
         if payload.get("type") != "access":
-            raise api_error(401, "UNAUTHORIZED", "Access token이 아닙니다.")
+            raise api_error(401, "UNAUTHORIZED", "Access token is required.")
 
         subject = payload.get("sub")
         try:
             user_id = UUID(str(subject))
         except ValueError as exc:
-            raise api_error(401, "UNAUTHORIZED", "토큰이 올바르지 않습니다.") from exc
+            raise api_error(401, "UNAUTHORIZED", "Invalid token subject.") from exc
 
         user = await self.user_repository.get_by_id(user_id)
         if user is None:
-            raise api_error(401, "UNAUTHORIZED", "사용자를 찾을 수 없습니다.")
+            raise api_error(401, "UNAUTHORIZED", "User not found.")
         return self._to_user_read(user)
 
     async def check_email(self, email: str) -> dict[str, bool]:

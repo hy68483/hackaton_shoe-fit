@@ -52,7 +52,7 @@ async def validation_exception_handler(
             "success": False,
             "error": {
                 "code": "VALIDATION_ERROR",
-                "message": "입력값이 올바르지 않습니다.",
+                "message": "Invalid request value.",
                 "field": field,
                 "details": {"errors": exc.errors()},
             },
