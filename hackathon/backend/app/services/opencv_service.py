@@ -71,15 +71,10 @@ class OpenCVService:
         ordered[3] = points[np.argmax(differences)]
         return ordered
 
-    def detect_marker_centers(self, image: np.ndarray) -> np.ndarray | None:
-        """사진 속 네 개의 검은 사각형 마커 중심을 찾아 정렬한다.
-
-        이 측정지는 ArUco가 아닌 40 mm 정사각형의 사용자 정의 마커이므로,
-        검은 정사각형 외곽선을 기준으로 검출한다. 마커 내부의 흰 문양은 외곽
-        contour에 영향을 주지 않는다.
-        """
+    def _marker_quadrilaterals(self, image: np.ndarray) -> list[np.ndarray]:
+        """가려지지 않은 네 개의 정사각형 마커 외곽을 반환한다."""
         if image is None or image.size == 0:
-            return None
+            return []
 
         gray = self._gray(image)
         # 조명에 따라 완전한 검정이 아니어도 검출할 수 있도록 어두운 영역을 이진화한다.
@@ -101,16 +96,50 @@ class OpenCVService:
             if rectangularity < 0.65:
                 continue
             approx = cv2.approxPolyDP(contour, 0.04 * cv2.arcLength(contour, True), True)
-            if len(approx) < 4 or len(approx) > 8:
+            if len(approx) != 4 or not cv2.isContourConvex(approx):
                 continue
-            candidates.append((area, np.array([x + width / 2, y + height / 2], dtype=np.float32)))
+            candidates.append((area, self._order_points(approx.reshape(4, 2).astype(np.float32))))
 
         if len(candidates) < 4:
+            return []
+
+        return [points for _, points in sorted(candidates, reverse=True, key=lambda item: item[0])[:4]]
+
+    def detect_marker_centers(self, image: np.ndarray) -> np.ndarray | None:
+        """사진 속 완전한 네 개의 40 mm 정사각형 마커 중심을 정렬한다.
+
+        마커가 발이나 다리에 가려지면 중심의 실제 위치를 복원할 수 없으므로
+        부분 사각형은 측정 보정에 사용하지 않는다.
+        """
+        quadrilaterals = self._marker_quadrilaterals(image)
+        if len(quadrilaterals) != 4:
             return None
 
-        # 면적이 가장 큰 네 정사각형이 측정지의 네 마커다.
-        centers = np.array([center for _, center in sorted(candidates, reverse=True, key=lambda item: item[0])[:4]])
+        centers = np.array([points.mean(axis=0) for points in quadrilaterals], dtype=np.float32)
         return self._order_points(centers)
+
+    def _marker_scale_is_consistent(self, image: np.ndarray) -> bool:
+        """마커 한 변 40 mm와 중심거리 배치가 사진에서 함께 성립하는지 확인한다."""
+        quadrilaterals = self._marker_quadrilaterals(image)
+        if len(quadrilaterals) != 4:
+            return False
+        centers = np.array([points.mean(axis=0) for points in quadrilaterals], dtype=np.float32)
+        ordered_centers = self._order_points(centers)
+        ordered_quadrilaterals = [
+            min(quadrilaterals, key=lambda points: np.linalg.norm(points.mean(axis=0) - center))
+            for center in ordered_centers
+        ]
+        destination_centers = self.marker_layout.destination_centers(self.PIXELS_PER_MM)
+        matrix = cv2.getPerspectiveTransform(ordered_centers, destination_centers)
+        side_lengths: list[float] = []
+        for quadrilateral in ordered_quadrilaterals:
+            corrected = cv2.perspectiveTransform(quadrilateral.reshape(-1, 1, 2), matrix).reshape(-1, 2)
+            side_lengths.extend(
+                float(np.linalg.norm(corrected[(index + 1) % 4] - corrected[index]))
+                for index in range(4)
+            )
+        marker_side_mm = float(np.median(side_lengths) / self.PIXELS_PER_MM)
+        return abs(marker_side_mm - self.marker_layout.marker_size_mm) <= self.marker_layout.marker_size_mm * 0.12
 
     def validate_image(self, image: np.ndarray) -> dict[str, Any]:
         if image is None or not isinstance(image, np.ndarray) or image.size == 0:
@@ -121,13 +150,14 @@ class OpenCVService:
         brightness = float(gray.mean())
         brightness_ok = self.MIN_BRIGHTNESS <= brightness <= self.MAX_BRIGHTNESS
         marker_ok = self.detect_marker_centers(image) is not None
+        marker_scale_ok = marker_ok and self._marker_scale_is_consistent(image)
         checks = {
             "measurement_sheet": marker_ok,
             "foot_complete": True,
             "blur": blur_ok,
             "brightness": brightness_ok,
             "marker": marker_ok,
-            "perspective": marker_ok,
+            "perspective": marker_scale_ok,
         }
         if not brightness_ok:
             return {"valid": False, "reason": "IMAGE_TOO_DARK", "checks": checks}
@@ -135,7 +165,23 @@ class OpenCVService:
             return {"valid": False, "reason": "IMAGE_BLUR", "checks": checks}
         if not marker_ok:
             return {"valid": False, "reason": "MARKER_NOT_FOUND", "checks": checks}
+        if not marker_scale_ok:
+            return {"valid": False, "reason": "MARKER_SCALE_MISMATCH", "checks": checks}
         return {"valid": True, "checks": checks}
+
+    def lower_leg_negative_point(self, image: np.ndarray) -> tuple[int, int] | None:
+        """하단 마커 바깥의 하퇴 지점을 SAM 음성 프롬프트로 추정한다."""
+        centers = self.detect_marker_centers(image)
+        if centers is None:
+            return None
+        top_center = (centers[0] + centers[1]) / 2
+        bottom_center = (centers[2] + centers[3]) / 2
+        candidate = bottom_center + (bottom_center - top_center) * 0.20
+        height, width = image.shape[:2]
+        x, y = np.rint(candidate).astype(int)
+        if not 0 <= x < width or not 0 <= y < height:
+            return None
+        return int(x), int(y)
 
     async def validate_image_quality(self, image_path: Path) -> dict[str, bool]:
         """업로드된 파일을 기존 이미지 검증 서비스가 요구하는 checks 형식으로 반환한다."""

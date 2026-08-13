@@ -24,7 +24,12 @@ class MeasurementService:
             return {"success": False, "reason": validation["reason"]}
         try:
             # 사용자 선택 좌표로 발 mask를 만들고, 원근 보정 후 치수를 계산한다.
-            segmentation = self.sam_service.segment(image, point_x, point_y)
+            segmentation = self.sam_service.segment(
+                image,
+                point_x,
+                point_y,
+                negative_point=self.opencv_service.lower_leg_negative_point(image),
+            )
             corrected = self.opencv_service.correct_perspective(image, segmentation["mask"])
             dimensions = self.opencv_service.measure_mask(corrected["mask"], corrected["scale_mm_per_px"])
         except SegmentationError:

@@ -129,6 +129,9 @@ POST /api/v1/measurements/sessions/{session_id}/analyze
 }
 ```
 
-Use a barefoot photo where all four markers are visible. A missing marker,
-insufficient brightness, or excessive blur returns a retake reason before SAM
-inference starts.
+Use a barefoot photo where the complete outer square of all four markers is
+visible. The marker side (40 mm) and the 90 mm × 176 mm center-distance layout
+must agree in the image; otherwise the API returns `MARKER_SCALE_MISMATCH`
+instead of a potentially incorrect measurement. A missing marker, insufficient
+brightness, or excessive blur also returns a retake reason before SAM inference
+starts.
