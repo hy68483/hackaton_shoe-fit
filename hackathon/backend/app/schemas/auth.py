@@ -40,3 +40,7 @@ class TokenPair(BaseModel):
 class LoginResponse(TokenPair):
     token_type: str = "bearer"
     expires_in: int
+
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str = Field(min_length=1)
