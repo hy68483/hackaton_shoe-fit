@@ -50,22 +50,22 @@ def decode_token(token: str) -> dict[str, Any]:
     try:
         header_segment, payload_segment, signature_segment = token.split(".")
     except ValueError as exc:
-        raise api_error(401, "UNAUTHORIZED", "토큰이 올바르지 않습니다.") from exc
+        raise api_error(401, "UNAUTHORIZED", "Invalid token format.") from exc
 
     signing_input = f"{header_segment}.{payload_segment}".encode("ascii")
     expected_signature = _sign(signing_input)
 
     if not hmac.compare_digest(signature_segment, expected_signature):
-        raise api_error(401, "UNAUTHORIZED", "토큰이 올바르지 않습니다.")
+        raise api_error(401, "UNAUTHORIZED", "Invalid token.")
 
     try:
         payload = json.loads(_base64url_decode(payload_segment))
     except (ValueError, json.JSONDecodeError) as exc:
-        raise api_error(401, "UNAUTHORIZED", "토큰이 올바르지 않습니다.") from exc
+        raise api_error(401, "UNAUTHORIZED", "Invalid token payload.") from exc
 
     exp = payload.get("exp")
     if not isinstance(exp, int) or datetime.now(UTC).timestamp() > exp:
-        raise api_error(401, "UNAUTHORIZED", "토큰이 만료되었습니다.")
+        raise api_error(401, "UNAUTHORIZED", "Token has expired.")
 
     return payload
 

@@ -23,10 +23,10 @@ def get_bearer_token(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
 ) -> str:
     if credentials is None:
-        raise api_error(401, "UNAUTHORIZED", "인증 토큰이 필요합니다.")
+        raise api_error(401, "UNAUTHORIZED", "Authentication token is required.")
 
     if credentials.scheme.lower() != "bearer" or not credentials.credentials:
-        raise api_error(401, "UNAUTHORIZED", "Bearer 토큰 형식이 아닙니다.")
+        raise api_error(401, "UNAUTHORIZED", "Invalid bearer token format.")
     return credentials.credentials
 
 
