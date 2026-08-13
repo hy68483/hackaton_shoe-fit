@@ -199,12 +199,34 @@ class OpenCVService:
             return None
         top_center = (centers[0] + centers[1]) / 2
         bottom_center = (centers[2] + centers[3]) / 2
-        candidate = bottom_center + (bottom_center - top_center) * 0.20
         height, width = image.shape[:2]
-        x, y = np.rint(candidate).astype(int)
-        if not 0 <= x < width or not 0 <= y < height:
+        raw_candidates = (
+            top_center + (top_center - bottom_center) * 0.20,
+            bottom_center + (bottom_center - top_center) * 0.20,
+        )
+        candidates = []
+        for candidate in raw_candidates:
+            x, y = np.rint(candidate).astype(int)
+            if 0 <= x < width and 0 <= y < height:
+                candidates.append((int(x), int(y)))
+        if not candidates:
             return None
-        return int(x), int(y)
+
+        def skin_score(point: tuple[int, int]) -> float:
+            x, y = point
+            radius = 25
+            patch = image[max(0, y - radius) : min(height, y + radius + 1), max(0, x - radius) : min(width, x + radius + 1)]
+            if patch.size == 0:
+                return float("-inf")
+            hsv = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)
+            blue, _, red = patch.reshape(-1, 3).mean(axis=0)
+            return float(red - blue + hsv[:, :, 1].mean())
+
+        scores = [skin_score(candidate) for candidate in candidates]
+        best_index = int(np.argmax(scores))
+        if scores[best_index] < 15.0:
+            return candidates[-1]
+        return candidates[best_index]
 
     async def validate_image_quality(self, image_path: Path) -> dict[str, bool]:
         """업로드된 파일을 기존 이미지 검증 서비스가 요구하는 checks 형식으로 반환한다."""

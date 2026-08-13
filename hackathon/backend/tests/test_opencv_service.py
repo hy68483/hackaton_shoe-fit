@@ -38,6 +38,15 @@ class OpenCVServiceTests(unittest.TestCase):
 
         self.assertEqual(negative_point, (525, 1496))
 
+    def test_uses_skin_coloured_marker_side_as_the_lower_leg_direction(self) -> None:
+        image = np.full((1500, 1100, 3), 230, dtype=np.uint8)
+        for center in ((200, 350), (850, 350), (850, 1100), (200, 1100)):
+            x, y = center
+            cv2.rectangle(image, (x - 62, y - 62), (x + 62, y + 62), (20, 20, 20), -1)
+        cv2.rectangle(image, (490, 165), (560, 235), (80, 100, 140), -1)
+
+        self.assertEqual(self.service.lower_leg_negative_point(image), (525, 200))
+
     def test_marker_layout_uses_the_specified_physical_distances(self) -> None:
         destination = self.service.marker_layout.destination_centers(pixels_per_mm=5.0)
 
