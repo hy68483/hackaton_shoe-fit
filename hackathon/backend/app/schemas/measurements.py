@@ -66,3 +66,8 @@ class MeasurementResultRead(BaseModel):
     segmentation_confidence: float | None = None
     status: str
     measured_at: datetime
+
+
+class MeasurementAnalysisRequest(BaseModel):
+    point_x: int = Field(ge=0)
+    point_y: int = Field(ge=0)

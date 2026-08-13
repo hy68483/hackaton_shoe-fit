@@ -9,11 +9,13 @@ from app.core.database import get_db_session
 from app.core.exceptions import api_error
 from app.schemas.measurements import (
     ImageUploadForm,
+    MeasurementAnalysisRequest,
     MeasurementResultApply,
     MeasurementSessionCreate,
 )
 from app.services import (
     AuthService,
+    MeasurementAnalysisService,
     MeasurementImageService,
     MeasurementResultService,
     MeasurementSessionService,
@@ -39,6 +41,12 @@ def get_measurement_image_service(
     session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> MeasurementImageService:
     return MeasurementImageService(session)
+
+
+def get_measurement_analysis_service(
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> MeasurementAnalysisService:
+    return MeasurementAnalysisService(session)
 
 
 def get_measurement_result_service(
@@ -177,6 +185,27 @@ async def validate_measurement_image(
     return {
         "success": True,
         "data": validation.model_dump(exclude_none=True),
+    }
+
+
+@router.post("/sessions/{session_id}/analyze")
+async def analyze_measurement_image(
+    session_id: UUID,
+    payload: MeasurementAnalysisRequest,
+    user_id: Annotated[UUID, Depends(get_current_user_id)],
+    measurement_analysis_service: Annotated[
+        MeasurementAnalysisService,
+        Depends(get_measurement_analysis_service),
+    ],
+) -> dict[str, object]:
+    await measurement_analysis_service.analyze(
+        user_id=user_id,
+        session_id=session_id,
+        payload=payload,
+    )
+    return {
+        "success": True,
+        "data": None,
     }
 
 
