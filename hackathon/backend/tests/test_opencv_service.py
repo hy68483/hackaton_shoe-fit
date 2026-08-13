@@ -10,7 +10,8 @@ class OpenCVServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.service = OpenCVService()
         self.image = np.full((1300, 900, 3), 230, dtype=np.uint8)
-        for center in ((150, 150), (600, 150), (600, 1030), (150, 1030)):
+        # 5 px/mm 기준으로 중심 간 가로 85 mm, 세로 170 mm인 AprilTag 배치다.
+        for center in ((150, 150), (575, 150), (575, 1000), (150, 1000)):
             x, y = center
             cv2.rectangle(self.image, (x - 100, y - 100), (x + 100, y + 100), (20, 20, 20), -1)
 
@@ -20,7 +21,7 @@ class OpenCVServiceTests(unittest.TestCase):
         self.assertIsNotNone(centers)
         np.testing.assert_allclose(
             centers,
-            np.array([[150, 150], [600, 150], [600, 1030], [150, 1030]], dtype=np.float32),
+            np.array([[150, 150], [575, 150], [575, 1000], [150, 1000]], dtype=np.float32),
             atol=2,
         )
 
@@ -35,7 +36,15 @@ class OpenCVServiceTests(unittest.TestCase):
     def test_estimates_lower_leg_negative_point_from_bottom_markers(self) -> None:
         negative_point = self.service.lower_leg_negative_point(self.image)
 
-        self.assertEqual(negative_point, (375, 1206))
+        self.assertEqual(negative_point, (362, 1170))
+
+    def test_marker_layout_uses_the_specified_physical_distances(self) -> None:
+        destination = self.service.marker_layout.destination_centers(pixels_per_mm=5.0)
+
+        np.testing.assert_array_equal(
+            destination,
+            np.array([[0, 0], [425, 0], [425, 850], [0, 850]], dtype=np.float32),
+        )
 
     def test_rejects_a_marker_with_an_obscured_corner(self) -> None:
         image = self.image.copy()

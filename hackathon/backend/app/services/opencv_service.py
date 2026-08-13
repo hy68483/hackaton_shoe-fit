@@ -23,8 +23,8 @@ class MarkerLayout:
     """인쇄된 마커 중심의 실제 물리 배치(mm)다."""
 
     marker_size_mm: float = 40.0
-    horizontal_center_distance_mm: float = 90.0
-    vertical_center_distance_mm: float = 176.0
+    horizontal_center_distance_mm: float = 85.0
+    vertical_center_distance_mm: float = 170.0
 
     def destination_centers(self, pixels_per_mm: float) -> np.ndarray:
         """좌상, 우상, 우하, 좌하 순서의 균일한 축척 좌표를 반환한다."""
@@ -105,13 +105,34 @@ class OpenCVService:
 
         return [points for _, points in sorted(candidates, reverse=True, key=lambda item: item[0])[:4]]
 
+    @staticmethod
+    def _detect_apriltag_markers(image: np.ndarray) -> list[tuple[int, np.ndarray]]:
+        """AprilTag-36h11 ID와 네 모서리를 검출한다."""
+        aruco = getattr(cv2, "aruco", None)
+        if aruco is None:
+            return []
+        dictionary = aruco.getPredefinedDictionary(aruco.DICT_APRILTAG_36h11)
+        detector = getattr(aruco, "ArucoDetector", None)
+        gray = image if image.ndim == 2 else cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        if detector is not None:
+            corners, ids, _ = detector(dictionary).detectMarkers(gray)
+        else:
+            corners, ids, _ = aruco.detectMarkers(gray, dictionary)
+        if ids is None:
+            return []
+        return [
+            (int(marker_id), corners[index].reshape(4, 2).astype(np.float32))
+            for index, marker_id in enumerate(ids.flatten())
+        ]
+
     def detect_marker_centers(self, image: np.ndarray) -> np.ndarray | None:
         """사진 속 완전한 네 개의 40 mm 정사각형 마커 중심을 정렬한다.
 
         마커가 발이나 다리에 가려지면 중심의 실제 위치를 복원할 수 없으므로
         부분 사각형은 측정 보정에 사용하지 않는다.
         """
-        quadrilaterals = self._marker_quadrilaterals(image)
+        tag_markers = self._detect_apriltag_markers(image)
+        quadrilaterals = [points for _, points in tag_markers] if len(tag_markers) == 4 else self._marker_quadrilaterals(image)
         if len(quadrilaterals) != 4:
             return None
 
@@ -120,7 +141,8 @@ class OpenCVService:
 
     def _marker_scale_is_consistent(self, image: np.ndarray) -> bool:
         """마커 한 변 40 mm와 중심거리 배치가 사진에서 함께 성립하는지 확인한다."""
-        quadrilaterals = self._marker_quadrilaterals(image)
+        tag_markers = self._detect_apriltag_markers(image)
+        quadrilaterals = [points for _, points in tag_markers] if len(tag_markers) == 4 else self._marker_quadrilaterals(image)
         if len(quadrilaterals) != 4:
             return False
         centers = np.array([points.mean(axis=0) for points in quadrilaterals], dtype=np.float32)
@@ -198,7 +220,7 @@ class OpenCVService:
         }
 
     def correct_perspective(self, image: np.ndarray, mask: np.ndarray | None = None) -> dict[str, Any]:
-        """마커 중심 간 실제 거리(가로 90 mm, 세로 176 mm)로 원근을 보정한다."""
+        """마커 중심 간 실제 거리(가로 85 mm, 세로 170 mm)로 원근을 보정한다."""
         source = self.detect_marker_centers(image)
         if source is None:
             raise ImageValidationError("PERSPECTIVE_FAILED")

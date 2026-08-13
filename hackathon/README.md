@@ -116,7 +116,7 @@ The image analysis endpoint uses SAM and OpenCV after image validation. Set
 not be committed to the repository.
 
 The calibration sheet uses four 40 mm square markers. Their center-to-center
-distances are 90 mm horizontally and 176 mm vertically. The service detects all
+distances are 85 mm horizontally and 170 mm vertically. The service detects all
 four marker centers, applies a perspective transform with a uniform mm scale,
 segments the foot from the user-selected point, and returns foot length, width,
 and segmentation confidence.
@@ -130,7 +130,7 @@ POST /api/v1/measurements/sessions/{session_id}/analyze
 ```
 
 Use a barefoot photo where the complete outer square of all four markers is
-visible. The marker side (40 mm) and the 90 mm × 176 mm center-distance layout
+visible. The marker side (40 mm) and the 85 mm × 170 mm center-distance layout
 must agree in the image; otherwise the API returns `MARKER_SCALE_MISMATCH`
 instead of a potentially incorrect measurement. A missing marker, insufficient
 brightness, or excessive blur also returns a retake reason before SAM inference
