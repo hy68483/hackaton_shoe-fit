@@ -15,7 +15,14 @@ from app.core.security import (
 )
 from app.models import User
 from app.repositories import UserRepository
-from app.schemas.auth import LoginResponse, TokenPair, UserCreate, UserLogin, UserRead
+from app.schemas.auth import (
+    LoginResponse,
+    RefreshTokenRequest,
+    TokenPair,
+    UserCreate,
+    UserLogin,
+    UserRead,
+)
 
 
 class AuthService:
@@ -47,6 +54,28 @@ class AuthService:
                 "UNAUTHORIZED",
                 "이메일 또는 비밀번호가 올바르지 않습니다.",
             )
+
+        token_pair = self._create_token_pair(user)
+        return LoginResponse(
+            access_token=token_pair.access_token,
+            refresh_token=token_pair.refresh_token,
+            expires_in=settings.access_token_expire_minutes * 60,
+        )
+
+    async def refresh(self, payload: RefreshTokenRequest) -> LoginResponse:
+        token_payload = decode_token(payload.refresh_token)
+        if token_payload.get("type") != "refresh":
+            raise api_error(401, "UNAUTHORIZED", "Refresh token is required.")
+
+        subject = token_payload.get("sub")
+        try:
+            user_id = UUID(str(subject))
+        except ValueError as exc:
+            raise api_error(401, "UNAUTHORIZED", "Invalid token subject.") from exc
+
+        user = await self.user_repository.get_by_id(user_id)
+        if user is None:
+            raise api_error(401, "UNAUTHORIZED", "User not found.")
 
         token_pair = self._create_token_pair(user)
         return LoginResponse(
