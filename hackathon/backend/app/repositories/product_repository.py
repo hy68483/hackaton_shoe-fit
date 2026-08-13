@@ -62,6 +62,28 @@ class ProductRepository:
         )
         return list(result.scalars().all())
 
+    async def list_recommendation_candidates(
+        self,
+        *,
+        product_id: UUID | None = None,
+        brand_id: UUID | None = None,
+    ) -> list[ProductSize]:
+        statement = (
+            select(ProductSize)
+            .join(Product)
+            .options(selectinload(ProductSize.product).selectinload(Product.brand))
+            .where(Product.data_status == "AVAILABLE")
+        )
+        if product_id is not None:
+            statement = statement.where(ProductSize.product_id == product_id)
+        if brand_id is not None:
+            statement = statement.where(Product.brand_id == brand_id)
+
+        result = await self.session.execute(
+            statement.order_by(Product.name.asc(), ProductSize.size.asc())
+        )
+        return list(result.scalars().all())
+
     def _base_search_statement(
         self,
         *,
