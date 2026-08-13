@@ -50,3 +50,19 @@ class ImageUploadForm(BaseModel):
     client_width: int = Field(gt=0)
     client_height: int = Field(gt=0)
     device_orientation: str = Field(min_length=1, max_length=30)
+
+
+class MeasurementResultApply(BaseModel):
+    foot_length_mm: float = Field(gt=0, le=400)
+    foot_width_mm: float = Field(gt=0, le=200)
+    segmentation_confidence: float | None = Field(default=None, ge=0, le=1)
+
+
+class MeasurementResultRead(BaseModel):
+    result_id: str
+    session_id: str
+    foot_length_mm: float
+    foot_width_mm: float
+    segmentation_confidence: float | None = None
+    status: str
+    measured_at: datetime

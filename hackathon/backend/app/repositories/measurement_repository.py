@@ -1,10 +1,11 @@
 from datetime import datetime, timezone
+from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Measurement, MeasurementImage
+from app.models import Measurement, MeasurementImage, MeasurementResult
 
 
 class MeasurementRepository:
@@ -99,5 +100,36 @@ class MeasurementRepository:
             .where(MeasurementImage.measurement_id == measurement_id)
             .order_by(MeasurementImage.created_at.desc())
             .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def upsert_result(
+        self,
+        *,
+        measurement: Measurement,
+        foot_length_mm: Decimal,
+        foot_width_mm: Decimal,
+        segmentation_confidence: Decimal | None,
+    ) -> MeasurementResult:
+        result = await self.get_result(measurement.id)
+        if result is None:
+            result = MeasurementResult(measurement_id=measurement.id)
+            self.session.add(result)
+
+        result.foot_length_mm = foot_length_mm
+        result.foot_width_mm = foot_width_mm
+        result.segmentation_confidence = segmentation_confidence
+        result.measured_at = datetime.now(timezone.utc)
+        measurement.confidence = segmentation_confidence
+        measurement.status = "COMPLETED"
+
+        await self.session.commit()
+        await self.session.refresh(measurement)
+        await self.session.refresh(result)
+        return result
+
+    async def get_result(self, measurement_id: UUID) -> MeasurementResult | None:
+        result = await self.session.execute(
+            select(MeasurementResult).where(MeasurementResult.measurement_id == measurement_id)
         )
         return result.scalar_one_or_none()
