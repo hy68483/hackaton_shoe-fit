@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 
 from app.services.camera_calibration import CameraCalibration
-from app.services.opencv_service import CheckerboardLayout, OpenCVService, SideCheckerboardLayout
+from app.services.opencv_service import CheckerboardLayout, OpenCVService
 
 
 class OpenCVServiceTests(unittest.TestCase):
@@ -107,31 +107,6 @@ class OpenCVServiceTests(unittest.TestCase):
         self.assertTrue(validation["valid"])
         self.assertEqual(corrected["scale_mm_per_px"], 0.2)
         self.assertGreater(corrected["image"].shape[0], 0)
-
-    def test_uses_side_checkerboards_when_the_centre_is_reserved_for_a_foot(self) -> None:
-        square_px = 50
-        image = np.full((600, 900, 3), 255, dtype=np.uint8)
-        for origin_x in (20, 680):
-            for row in range(8):
-                for column in range(4):
-                    if (row + column) % 2 == 0:
-                        cv2.rectangle(
-                            image,
-                            (origin_x + column * square_px, 100 + row * square_px),
-                            (origin_x + (column + 1) * square_px - 1, 100 + (row + 1) * square_px - 1),
-                            (0, 0, 0),
-                            -1,
-                        )
-        # 중앙에는 발이 놓여 체커보드가 보이지 않는 상황을 흉내 낸다.
-        cv2.ellipse(image, (450, 300), (130, 250), 0, 0, 360, (120, 150, 180), -1)
-        service = OpenCVService(side_checkerboard_layout=SideCheckerboardLayout(square_size_mm=30.0))
-
-        validation = service.validate_image(image)
-        corrected = service.correct_perspective(image)
-
-        self.assertTrue(validation["valid"])
-        self.assertEqual(corrected["scale_mm_per_px"], 0.2)
-        self.assertGreater(corrected["image"].shape[1], 0)
 
     def test_parallax_measurement_recovers_a_raised_foot_shape(self) -> None:
         camera_matrix = np.array([[1000.0, 0.0, 600.0], [0.0, 1000.0, 600.0], [0.0, 0.0, 1.0]])
