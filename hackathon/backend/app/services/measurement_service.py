@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from statistics import median
+from typing import Iterable
+
 import numpy as np
 
 from app.core.config import settings
@@ -12,6 +15,10 @@ from .sam_service import SAMService, SegmentationError
 
 
 class MeasurementService:
+    # 3장 촬영 기준으로 이 범위를 넘으면, 평균값을 최종 길이로 확정하지 않는다.
+    MAX_MULTI_CAPTURE_LENGTH_SPREAD_MM = 5.0
+    MAX_MULTI_CAPTURE_WIDTH_SPREAD_MM = 3.0
+
     def __init__(self, sam_service: SAMService | None = None, opencv_service: OpenCVService | None = None) -> None:
         # 테스트에서는 가짜 서비스 주입이 가능하고, 기본 실행은 실제 서비스로 구성한다.
         self.sam_service = sam_service or SAMService(model_path=settings.sam_model_path or None)
@@ -64,3 +71,58 @@ class MeasurementService:
             return {"success": False, "reason": "MEASUREMENT_FAILED"}
         # 성공 응답에는 문서에서 요구한 세 개의 측정값만 포함한다.
         return {**dimensions, "segmentation_confidence": float(segmentation["segmentation_confidence"])}
+
+    @classmethod
+    def aggregate_measurements(
+        cls,
+        measurements: Iterable[dict[str, float | bool | str]],
+    ) -> dict[str, float | bool | int | str]:
+        """여러 장의 측정 결과를 집계하고, 편차가 크면 보정 정보를 반환한다.
+
+        촬영 각도나 SAM의 뒤꿈치 경계가 달라질 수 있으므로, 길이 편차가 임계치를
+        초과한 경우 산술 평균 대신 중앙값을 ``corrected_foot_length_mm``으로 제공한다.
+        이 값은 재촬영이 필요한 상태임을 함께 알려 주는 임시 대표값이며, 사용자에게
+        정확한 최종 측정값처럼 확정해서는 안 된다.
+        """
+        successful = [result for result in measurements if result.get("success") is not False]
+        if len(successful) < 2:
+            raise ValueError("At least two successful measurements are required.")
+
+        try:
+            lengths = [float(result["foot_length_mm"]) for result in successful]
+            widths = [float(result["foot_width_mm"]) for result in successful]
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError("Measurements must include numeric foot_length_mm and foot_width_mm.") from error
+
+        length_average = float(np.mean(lengths))
+        width_average = float(np.mean(widths))
+        length_median = float(median(lengths))
+        width_median = float(median(widths))
+        length_spread = max(lengths) - min(lengths)
+        width_spread = max(widths) - min(widths)
+        length_correction_required = length_spread > cls.MAX_MULTI_CAPTURE_LENGTH_SPREAD_MM
+        width_correction_required = width_spread > cls.MAX_MULTI_CAPTURE_WIDTH_SPREAD_MM
+
+        corrected_length = length_median if length_correction_required else length_average
+        corrected_width = width_median if width_correction_required else width_average
+
+        return {
+            "measurement_count": len(successful),
+            "raw_average_foot_length_mm": round(length_average, 1),
+            "raw_average_foot_width_mm": round(width_average, 1),
+            "corrected_foot_length_mm": round(corrected_length, 1),
+            "corrected_foot_width_mm": round(corrected_width, 1),
+            "length_correction_mm": round(corrected_length - length_average, 1),
+            "width_correction_mm": round(corrected_width - width_average, 1),
+            "length_spread_mm": round(length_spread, 1),
+            "width_spread_mm": round(width_spread, 1),
+            "correction_applied": length_correction_required or width_correction_required,
+            "retake_required": length_correction_required,
+            "correction_reason": (
+                "LENGTH_SPREAD_EXCEEDED"
+                if length_correction_required
+                else "WIDTH_SPREAD_EXCEEDED"
+                if width_correction_required
+                else "NONE"
+            ),
+        }
