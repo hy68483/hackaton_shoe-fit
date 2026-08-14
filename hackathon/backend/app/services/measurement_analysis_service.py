@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import api_error
 from app.repositories import MeasurementRepository
 from app.schemas.measurements import (
+    MeasurementBatchAnalysisRequest,
     MeasurementAnalysisRequest,
     MeasurementResultApply,
     MeasurementResultRead,
@@ -75,3 +76,82 @@ class MeasurementAnalysisService:
                 segmentation_confidence=float(analysis["segmentation_confidence"]),
             ),
         )
+
+    async def analyze_batch(
+        self,
+        *,
+        user_id: UUID,
+        session_id: UUID,
+        payload: MeasurementBatchAnalysisRequest,
+    ) -> dict[str, object]:
+        """2~3장 측정값을 집계해 편차 보정 정보 또는 확정 측정값을 반환한다."""
+        measurement = await self.measurement_repository.get_session_for_user(
+            session_id=session_id,
+            user_id=user_id,
+        )
+        if measurement is None:
+            raise api_error(404, "NOT_FOUND", "Measurement session not found.")
+        if measurement.status == "DISCARDED" or measurement.discarded_at is not None:
+            raise api_error(409, "BUSINESS_RULE_VIOLATION", "Measurement session is discarded.")
+        if measurement.status != "SEGMENTING":
+            raise api_error(
+                409,
+                "BUSINESS_RULE_VIOLATION",
+                "Image validation is required before analysis.",
+                details={"status": measurement.status},
+            )
+
+        image_ids = [shot.image_id for shot in payload.shots]
+        if len(set(image_ids)) != len(image_ids):
+            raise api_error(422, "VALIDATION_ERROR", "Each batch shot must use a different image.")
+        images = await self.measurement_repository.get_images_by_ids(
+            measurement_id=measurement.id,
+            image_ids=image_ids,
+        )
+        images_by_id = {image.id: image for image in images}
+        if len(images_by_id) != len(image_ids):
+            raise api_error(422, "VALIDATION_ERROR", "One or more images do not belong to this session.")
+
+        analyses: list[dict[str, float | bool | str]] = []
+        for shot in payload.shots:
+            image = cv2.imread(str(Path(images_by_id[shot.image_id].original_key)))
+            analysis = self.measurement_service.analyze_foot(
+                image,
+                point_x=shot.point_x,
+                point_y=shot.point_y,
+            )
+            if analysis.get("success") is False:
+                raise api_error(
+                    422,
+                    "MEASUREMENT_ANALYSIS_FAILED",
+                    "One batch image could not be analyzed.",
+                    details={"image_id": str(shot.image_id), "reason": analysis["reason"]},
+                )
+            analyses.append(analysis)
+
+        aggregate = self.measurement_service.aggregate_measurements(analyses)
+        aggregate["individual_measurements"] = [
+            {
+                "image_id": str(shot.image_id),
+                "foot_length_mm": analysis["foot_length_mm"],
+                "foot_width_mm": analysis["foot_width_mm"],
+                "segmentation_confidence": analysis["segmentation_confidence"],
+            }
+            for shot, analysis in zip(payload.shots, analyses, strict=True)
+        ]
+        if bool(aggregate["retake_required"]):
+            await self.measurement_repository.update_status(measurement, "RETAKE_REQUIRED")
+            return aggregate
+
+        confidence = sum(float(analysis["segmentation_confidence"]) for analysis in analyses) / len(analyses)
+        applied = await self.measurement_result_service.apply_result(
+            user_id=user_id,
+            session_id=session_id,
+            payload=MeasurementResultApply(
+                foot_length_mm=float(aggregate["corrected_foot_length_mm"]),
+                foot_width_mm=float(aggregate["corrected_foot_width_mm"]),
+                segmentation_confidence=confidence,
+            ),
+        )
+        aggregate["result"] = applied.model_dump()
+        return aggregate
