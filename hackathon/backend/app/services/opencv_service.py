@@ -44,6 +44,28 @@ class MarkerLayout:
         )
 
 
+@dataclass(frozen=True)
+class CheckerboardLayout:
+    """체커보드의 내부 코너 개수와 한 칸의 실제 크기(mm)다."""
+
+    inner_corner_columns: int = 5
+    inner_corner_rows: int = 10
+    square_size_mm: float = 30.0
+
+    def destination_corners(
+        self,
+        pixels_per_mm: float,
+        pattern_size: tuple[int, int] | None = None,
+    ) -> np.ndarray:
+        columns, rows = pattern_size or (self.inner_corner_columns, self.inner_corner_rows)
+        coordinates = [
+            [column * self.square_size_mm * pixels_per_mm, row * self.square_size_mm * pixels_per_mm]
+            for row in range(rows)
+            for column in range(columns)
+        ]
+        return np.asarray(coordinates, dtype=np.float32)
+
+
 class OpenCVService:
     """네 개의 25 mm 마커를 사용해 발 사진을 실측 좌표계로 변환한다."""
 
@@ -55,13 +77,16 @@ class OpenCVService:
     PIXELS_PER_MM = 5.0
     ANKLE_CUTOFF_INSET_MM = 25.0
     MAX_POSE_REPROJECTION_ERROR_PX = 3.0
+    MIN_CHECKERBOARD_SQUARE_PX = 12.0
 
     def __init__(
         self,
         marker_layout: MarkerLayout | None = None,
+        checkerboard_layout: CheckerboardLayout | None = None,
         camera_calibration: CameraCalibration | None = None,
     ) -> None:
         self.marker_layout = marker_layout or MarkerLayout()
+        self.checkerboard_layout = checkerboard_layout or CheckerboardLayout()
         self.camera_calibration = camera_calibration
 
     @staticmethod
@@ -160,6 +185,70 @@ class OpenCVService:
         centers = np.array([points.mean(axis=0) for points in quadrilaterals], dtype=np.float32)
         return self._order_points(centers)
 
+    def _detect_checkerboard_corners(self, image: np.ndarray) -> tuple[np.ndarray, tuple[int, int]] | None:
+        """완전히 보이는 3 cm 체커보드의 내부 코너를 검출한다.
+
+        기본 측정지는 5x10 내부 코너이며, 세로/가로로 돌려 촬영한 경우도 허용한다.
+        발이 체커보드 중심을 가리면 표준 OpenCV 검출이 실패할 수 있으므로, 실제
+        측정지에서는 체커보드 코너 영역을 발 바깥 테두리에 배치해야 한다.
+        """
+        if image is None or image.size == 0:
+            return None
+        gray = self._gray(image)
+        configured = (
+            self.checkerboard_layout.inner_corner_columns,
+            self.checkerboard_layout.inner_corner_rows,
+        )
+        pattern_sizes = (configured, configured[::-1])
+        for pattern_size in pattern_sizes:
+            if pattern_size[0] < 2 or pattern_size[1] < 2:
+                continue
+            found, corners = cv2.findChessboardCornersSB(
+                gray,
+                pattern_size,
+                flags=cv2.CALIB_CB_NORMALIZE_IMAGE | cv2.CALIB_CB_EXHAUSTIVE,
+            )
+            if not found or corners is None:
+                found, corners = cv2.findChessboardCorners(
+                    gray,
+                    pattern_size,
+                    flags=cv2.CALIB_CB_ADAPTIVE_THRESH | cv2.CALIB_CB_NORMALIZE_IMAGE,
+                )
+                if found and corners is not None:
+                    corners = cv2.cornerSubPix(
+                        gray,
+                        corners,
+                        (11, 11),
+                        (-1, -1),
+                        (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.1),
+                    )
+            if found and corners is not None:
+                return corners.reshape(-1, 2).astype(np.float32), pattern_size
+        return None
+
+    def _reference_plane(self, image: np.ndarray) -> dict[str, Any] | None:
+        """AprilTag 또는 체커보드에서 원근 보정에 필요한 대응점을 만든다."""
+        marker_centers = self.detect_marker_centers(image)
+        if marker_centers is not None:
+            return {
+                "kind": "APRILTAG",
+                "source": marker_centers,
+                "destination": self.marker_layout.destination_centers(self.PIXELS_PER_MM),
+                "marker_centers": marker_centers,
+            }
+
+        checkerboard = self._detect_checkerboard_corners(image)
+        if checkerboard is None:
+            return None
+        source, pattern_size = checkerboard
+        return {
+            "kind": "CHECKERBOARD",
+            "source": source,
+            "destination": self.checkerboard_layout.destination_corners(self.PIXELS_PER_MM, pattern_size),
+            "marker_centers": None,
+            "pattern_size": pattern_size,
+        }
+
     def _marker_scale_is_consistent(self, image: np.ndarray) -> bool:
         """마커 한 변 25 mm와 중심거리 배치가 사진에서 함께 성립하는지 확인한다."""
         quadrilaterals = self._ordered_marker_quadrilaterals(image)
@@ -179,6 +268,25 @@ class OpenCVService:
         marker_side_mm = float(np.median(side_lengths) / self.PIXELS_PER_MM)
         return abs(marker_side_mm - self.marker_layout.marker_size_mm) <= self.marker_layout.marker_size_mm * 0.12
 
+    def _checkerboard_scale_is_consistent(self, image: np.ndarray) -> bool:
+        detected = self._detect_checkerboard_corners(image)
+        if detected is None:
+            return False
+        corners, pattern_size = detected
+        columns, rows = pattern_size
+        grid = corners.reshape(rows, columns, 2)
+        horizontal = np.linalg.norm(grid[:, 1:, :] - grid[:, :-1, :], axis=2).reshape(-1)
+        vertical = np.linalg.norm(grid[1:, :, :] - grid[:-1, :, :], axis=2).reshape(-1)
+        spacings = np.concatenate((horizontal, vertical))
+        return bool(len(spacings) and np.percentile(spacings, 10) >= self.MIN_CHECKERBOARD_SQUARE_PX)
+
+    def _reference_scale_is_consistent(self, image: np.ndarray, reference: dict[str, Any] | None) -> bool:
+        if reference is None:
+            return False
+        if reference["kind"] == "APRILTAG":
+            return self._marker_scale_is_consistent(image)
+        return self._checkerboard_scale_is_consistent(image)
+
     def validate_image(self, image: np.ndarray) -> dict[str, Any]:
         if image is None or not isinstance(image, np.ndarray) or image.size == 0:
             return {"valid": False, "reason": "IMAGE_INVALID", "checks": {}}
@@ -187,8 +295,9 @@ class OpenCVService:
         blur_ok = float(cv2.Laplacian(gray, cv2.CV_64F).var()) >= self.MIN_BLUR_VARIANCE
         brightness = float(gray.mean())
         brightness_ok = self.MIN_BRIGHTNESS <= brightness <= self.MAX_BRIGHTNESS
-        marker_ok = self.detect_marker_centers(image) is not None
-        marker_scale_ok = marker_ok and self._marker_scale_is_consistent(image)
+        reference = self._reference_plane(image)
+        marker_ok = reference is not None
+        marker_scale_ok = self._reference_scale_is_consistent(image, reference)
         checks = {
             "measurement_sheet": marker_ok,
             "foot_complete": True,
@@ -423,12 +532,17 @@ class OpenCVService:
 
     def correct_perspective(self, image: np.ndarray, mask: np.ndarray | None = None) -> dict[str, Any]:
         """마커 중심 간 실제 거리(가로 130 mm, 세로 216 mm)로 원근을 보정한다."""
-        source = self.detect_marker_centers(image)
-        if source is None:
+        reference = self._reference_plane(image)
+        if reference is None:
             raise ImageValidationError("PERSPECTIVE_FAILED")
-
-        destination = self.marker_layout.destination_centers(self.PIXELS_PER_MM)
-        base_matrix = cv2.getPerspectiveTransform(source, destination)
+        source = reference["source"]
+        destination = reference["destination"]
+        if len(source) == 4:
+            base_matrix = cv2.getPerspectiveTransform(source, destination)
+        else:
+            base_matrix, _ = cv2.findHomography(source, destination, method=0)
+            if base_matrix is None:
+                raise ImageValidationError("PERSPECTIVE_FAILED")
 
         # 발목처럼 마커 사각형 밖에 있는 영역도 잘리지 않도록 원본 전체의 변환 범위를 캔버스로 삼는다.
         height, width = image.shape[:2]
@@ -446,8 +560,9 @@ class OpenCVService:
                 mask.astype(np.uint8), matrix, output_size, flags=cv2.INTER_NEAREST
             )
             leg_negative_point = self.lower_leg_negative_point(image)
-            if leg_negative_point is not None:
-                transformed_markers = cv2.perspectiveTransform(source.reshape(-1, 1, 2), matrix).reshape(-1, 2)
+            if leg_negative_point is not None and reference["marker_centers"] is not None:
+                marker_centers = reference["marker_centers"]
+                transformed_markers = cv2.perspectiveTransform(marker_centers.reshape(-1, 1, 2), matrix).reshape(-1, 2)
                 transformed_negative_point = cv2.perspectiveTransform(
                     np.array([[leg_negative_point]], dtype=np.float32), matrix
                 ).reshape(2)

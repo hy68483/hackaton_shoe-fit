@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 
 from app.services.camera_calibration import CameraCalibration
-from app.services.opencv_service import OpenCVService
+from app.services.opencv_service import CheckerboardLayout, OpenCVService
 
 
 class OpenCVServiceTests(unittest.TestCase):
@@ -84,6 +84,29 @@ class OpenCVServiceTests(unittest.TestCase):
 
         self.assertAlmostEqual(measurement["foot_length_mm"], 100.0, delta=0.5)
         self.assertAlmostEqual(measurement["foot_width_mm"], 50.0, delta=0.5)
+
+    def test_uses_a_3cm_checkerboard_when_apriltags_are_absent(self) -> None:
+        square_px = 60
+        columns, rows = 6, 11  # 5 x 10 internal corners
+        checkerboard = np.full((rows * square_px, columns * square_px, 3), 255, dtype=np.uint8)
+        for row in range(rows):
+            for column in range(columns):
+                if (row + column) % 2 == 0:
+                    cv2.rectangle(
+                        checkerboard,
+                        (column * square_px, row * square_px),
+                        ((column + 1) * square_px - 1, (row + 1) * square_px - 1),
+                        (0, 0, 0),
+                        -1,
+                    )
+        service = OpenCVService(checkerboard_layout=CheckerboardLayout(square_size_mm=30.0))
+
+        validation = service.validate_image(checkerboard)
+        corrected = service.correct_perspective(checkerboard)
+
+        self.assertTrue(validation["valid"])
+        self.assertEqual(corrected["scale_mm_per_px"], 0.2)
+        self.assertGreater(corrected["image"].shape[0], 0)
 
     def test_parallax_measurement_recovers_a_raised_foot_shape(self) -> None:
         camera_matrix = np.array([[1000.0, 0.0, 600.0], [0.0, 1000.0, 600.0], [0.0, 0.0, 1.0]])
