@@ -66,6 +66,32 @@ class CheckerboardLayout:
         return np.asarray(coordinates, dtype=np.float32)
 
 
+@dataclass(frozen=True)
+class SideCheckerboardLayout:
+    """발 양옆에 놓는 두 체커보드 스트립의 실제 배치(mm)다.
+
+    A3 가로 용지(420 x 297 mm)에서 30 mm 사각형 4 x 8 칸 스트립을 좌우에
+    배치한다. 두 스트립 사이 180 mm는 발을 올리는 빈 영역이다.
+    """
+
+    inner_corner_columns: int = 3
+    inner_corner_rows: int = 7
+    square_size_mm: float = 30.0
+    horizontal_origin_distance_mm: float = 300.0
+
+    def destination_corners(self, pixels_per_mm: float, *, right: bool) -> np.ndarray:
+        origin_x = self.horizontal_origin_distance_mm if right else 0.0
+        coordinates = [
+            [
+                (origin_x + column * self.square_size_mm) * pixels_per_mm,
+                row * self.square_size_mm * pixels_per_mm,
+            ]
+            for row in range(self.inner_corner_rows)
+            for column in range(self.inner_corner_columns)
+        ]
+        return np.asarray(coordinates, dtype=np.float32)
+
+
 class OpenCVService:
     """네 개의 25 mm 마커를 사용해 발 사진을 실측 좌표계로 변환한다."""
 
@@ -83,10 +109,12 @@ class OpenCVService:
         self,
         marker_layout: MarkerLayout | None = None,
         checkerboard_layout: CheckerboardLayout | None = None,
+        side_checkerboard_layout: SideCheckerboardLayout | None = None,
         camera_calibration: CameraCalibration | None = None,
     ) -> None:
         self.marker_layout = marker_layout or MarkerLayout()
         self.checkerboard_layout = checkerboard_layout or CheckerboardLayout()
+        self.side_checkerboard_layout = side_checkerboard_layout or SideCheckerboardLayout()
         self.camera_calibration = camera_calibration
 
     @staticmethod
@@ -226,6 +254,82 @@ class OpenCVService:
                 return corners.reshape(-1, 2).astype(np.float32), pattern_size
         return None
 
+    @staticmethod
+    def _normalise_grid_orientation(corners: np.ndarray, pattern_size: tuple[int, int]) -> np.ndarray:
+        """검출 순서를 사진의 좌상단에서 우하단으로 안정적으로 정렬한다."""
+        columns, rows = pattern_size
+        grid = corners.reshape(rows, columns, 2).copy()
+        if grid[0, :, 1].mean() > grid[-1, :, 1].mean():
+            grid = grid[::-1, :, :]
+        if grid[:, 0, 0].mean() > grid[:, -1, 0].mean():
+            grid = grid[:, ::-1, :]
+        return grid.reshape(-1, 2).astype(np.float32)
+
+    def _detect_checkerboard_in_region(
+        self,
+        image: np.ndarray,
+        *,
+        x_start: int,
+        x_end: int,
+        pattern_size: tuple[int, int],
+    ) -> np.ndarray | None:
+        """이미지의 한 영역에서 지정된 체커보드 내부 코너를 찾아 원본 좌표로 돌린다."""
+        region = image[:, x_start:x_end]
+        if region.size == 0:
+            return None
+        gray = self._gray(region)
+        found, corners = cv2.findChessboardCornersSB(
+            gray,
+            pattern_size,
+            flags=cv2.CALIB_CB_NORMALIZE_IMAGE | cv2.CALIB_CB_EXHAUSTIVE,
+        )
+        if not found or corners is None:
+            found, corners = cv2.findChessboardCorners(
+                gray,
+                pattern_size,
+                flags=cv2.CALIB_CB_ADAPTIVE_THRESH | cv2.CALIB_CB_NORMALIZE_IMAGE,
+            )
+            if found and corners is not None:
+                corners = cv2.cornerSubPix(
+                    gray,
+                    corners,
+                    (11, 11),
+                    (-1, -1),
+                    (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.1),
+                )
+        if not found or corners is None:
+            return None
+        result = self._normalise_grid_orientation(corners.reshape(-1, 2), pattern_size)
+        result[:, 0] += x_start
+        return result
+
+    def _detect_side_checkerboard_corners(self, image: np.ndarray) -> tuple[np.ndarray, np.ndarray] | None:
+        """발을 가리지 않는 좌우 체커보드 스트립을 각각 검출한다."""
+        if image is None or image.size == 0:
+            return None
+        height, width = image.shape[:2]
+        del height
+        split = int(round(width * 0.45))
+        pattern_size = (
+            self.side_checkerboard_layout.inner_corner_columns,
+            self.side_checkerboard_layout.inner_corner_rows,
+        )
+        left = self._detect_checkerboard_in_region(
+            image,
+            x_start=0,
+            x_end=split,
+            pattern_size=pattern_size,
+        )
+        right = self._detect_checkerboard_in_region(
+            image,
+            x_start=width - split,
+            x_end=width,
+            pattern_size=pattern_size,
+        )
+        if left is None or right is None:
+            return None
+        return left, right
+
     def _reference_plane(self, image: np.ndarray) -> dict[str, Any] | None:
         """AprilTag 또는 체커보드에서 원근 보정에 필요한 대응점을 만든다."""
         marker_centers = self.detect_marker_centers(image)
@@ -235,6 +339,21 @@ class OpenCVService:
                 "source": marker_centers,
                 "destination": self.marker_layout.destination_centers(self.PIXELS_PER_MM),
                 "marker_centers": marker_centers,
+            }
+
+        side_checkerboards = self._detect_side_checkerboard_corners(image)
+        if side_checkerboards is not None:
+            left, right = side_checkerboards
+            return {
+                "kind": "SIDE_CHECKERBOARD",
+                "source": np.concatenate((left, right)),
+                "destination": np.concatenate(
+                    (
+                        self.side_checkerboard_layout.destination_corners(self.PIXELS_PER_MM, right=False),
+                        self.side_checkerboard_layout.destination_corners(self.PIXELS_PER_MM, right=True),
+                    )
+                ),
+                "marker_centers": None,
             }
 
         checkerboard = self._detect_checkerboard_corners(image)
@@ -280,11 +399,31 @@ class OpenCVService:
         spacings = np.concatenate((horizontal, vertical))
         return bool(len(spacings) and np.percentile(spacings, 10) >= self.MIN_CHECKERBOARD_SQUARE_PX)
 
+    def _side_checkerboard_scale_is_consistent(self, image: np.ndarray) -> bool:
+        detected = self._detect_side_checkerboard_corners(image)
+        if detected is None:
+            return False
+        columns = self.side_checkerboard_layout.inner_corner_columns
+        rows = self.side_checkerboard_layout.inner_corner_rows
+        spacings: list[np.ndarray] = []
+        for corners in detected:
+            grid = corners.reshape(rows, columns, 2)
+            spacings.extend(
+                (
+                    np.linalg.norm(grid[:, 1:, :] - grid[:, :-1, :], axis=2).reshape(-1),
+                    np.linalg.norm(grid[1:, :, :] - grid[:-1, :, :], axis=2).reshape(-1),
+                )
+            )
+        combined = np.concatenate(spacings)
+        return bool(len(combined) and np.percentile(combined, 10) >= self.MIN_CHECKERBOARD_SQUARE_PX)
+
     def _reference_scale_is_consistent(self, image: np.ndarray, reference: dict[str, Any] | None) -> bool:
         if reference is None:
             return False
         if reference["kind"] == "APRILTAG":
             return self._marker_scale_is_consistent(image)
+        if reference["kind"] == "SIDE_CHECKERBOARD":
+            return self._side_checkerboard_scale_is_consistent(image)
         return self._checkerboard_scale_is_consistent(image)
 
     def validate_image(self, image: np.ndarray) -> dict[str, Any]:
@@ -318,11 +457,15 @@ class OpenCVService:
 
     def lower_leg_negative_point(self, image: np.ndarray) -> tuple[int, int] | None:
         """하단 마커 바깥의 하퇴 지점을 SAM 음성 프롬프트로 추정한다."""
-        centers = self.detect_marker_centers(image)
-        if centers is None:
+        reference = self._reference_plane(image)
+        if reference is None:
             return None
-        top_center = (centers[0] + centers[1]) / 2
-        bottom_center = (centers[2] + centers[3]) / 2
+        reference_points = np.asarray(reference["source"], dtype=np.float32).reshape(-1, 2)
+        min_x, min_y = np.min(reference_points, axis=0)
+        max_x, max_y = np.max(reference_points, axis=0)
+        center_x = (min_x + max_x) / 2
+        top_center = np.array((center_x, min_y), dtype=np.float32)
+        bottom_center = np.array((center_x, max_y), dtype=np.float32)
         height, width = image.shape[:2]
         raw_candidates = (
             top_center + (top_center - bottom_center) * 0.20,
@@ -369,15 +512,19 @@ class OpenCVService:
     def _trim_lower_leg_from_mask(
         self,
         mask: np.ndarray,
-        transformed_marker_centers: np.ndarray,
+        transformed_reference_points: np.ndarray,
         transformed_negative_point: np.ndarray,
     ) -> np.ndarray:
         """마커 행 바깥의 하퇴를 제외하고 발 마스크만 남긴다."""
         if mask is None or mask.size == 0:
             return mask
 
-        top_row = (transformed_marker_centers[0] + transformed_marker_centers[1]) / 2
-        bottom_row = (transformed_marker_centers[2] + transformed_marker_centers[3]) / 2
+        reference_points = np.asarray(transformed_reference_points, dtype=np.float32).reshape(-1, 2)
+        min_x, min_y = np.min(reference_points, axis=0)
+        max_x, max_y = np.max(reference_points, axis=0)
+        center_x = (min_x + max_x) / 2
+        top_row = np.array((center_x, min_y), dtype=np.float32)
+        bottom_row = np.array((center_x, max_y), dtype=np.float32)
         leg_row = min((top_row, bottom_row), key=lambda row: np.linalg.norm(row - transformed_negative_point))
         inset_px = int(round(self.ANKLE_CUTOFF_INSET_MM * self.PIXELS_PER_MM))
         trimmed = mask.copy()
@@ -560,15 +707,16 @@ class OpenCVService:
                 mask.astype(np.uint8), matrix, output_size, flags=cv2.INTER_NEAREST
             )
             leg_negative_point = self.lower_leg_negative_point(image)
-            if leg_negative_point is not None and reference["marker_centers"] is not None:
-                marker_centers = reference["marker_centers"]
-                transformed_markers = cv2.perspectiveTransform(marker_centers.reshape(-1, 1, 2), matrix).reshape(-1, 2)
+            if leg_negative_point is not None:
+                transformed_reference_points = cv2.perspectiveTransform(
+                    np.asarray(reference["source"], dtype=np.float32).reshape(-1, 1, 2), matrix
+                ).reshape(-1, 2)
                 transformed_negative_point = cv2.perspectiveTransform(
                     np.array([[leg_negative_point]], dtype=np.float32), matrix
                 ).reshape(2)
                 corrected_mask = self._trim_lower_leg_from_mask(
                     corrected_mask,
-                    transformed_markers,
+                    transformed_reference_points,
                     transformed_negative_point,
                 )
         return {
