@@ -9,6 +9,8 @@ from typing import Any
 import cv2
 import numpy as np
 
+from .camera_calibration import CameraCalibration
+
 
 class ImageValidationError(RuntimeError):
     """원근 보정에 필요한 이미지 조건을 충족하지 못했을 때 발생한다."""
@@ -52,9 +54,15 @@ class OpenCVService:
     MAX_BRIGHTNESS = 250.0
     PIXELS_PER_MM = 5.0
     ANKLE_CUTOFF_INSET_MM = 25.0
+    MAX_POSE_REPROJECTION_ERROR_PX = 3.0
 
-    def __init__(self, marker_layout: MarkerLayout | None = None) -> None:
+    def __init__(
+        self,
+        marker_layout: MarkerLayout | None = None,
+        camera_calibration: CameraCalibration | None = None,
+    ) -> None:
         self.marker_layout = marker_layout or MarkerLayout()
+        self.camera_calibration = camera_calibration
 
     @staticmethod
     def _gray(image: np.ndarray) -> np.ndarray:
@@ -127,14 +135,25 @@ class OpenCVService:
             for index, marker_id in enumerate(ids.flatten())
         ]
 
+    def _ordered_marker_quadrilaterals(self, image: np.ndarray) -> list[np.ndarray]:
+        tag_markers = self._detect_apriltag_markers(image)
+        quadrilaterals = [points for _, points in tag_markers] if len(tag_markers) == 4 else self._marker_quadrilaterals(image)
+        if len(quadrilaterals) != 4:
+            return []
+        centers = np.array([points.mean(axis=0) for points in quadrilaterals], dtype=np.float32)
+        ordered_centers = self._order_points(centers)
+        return [
+            min(quadrilaterals, key=lambda points: np.linalg.norm(points.mean(axis=0) - center))
+            for center in ordered_centers
+        ]
+
     def detect_marker_centers(self, image: np.ndarray) -> np.ndarray | None:
         """사진 속 완전한 네 개의 25 mm 정사각형 마커 중심을 정렬한다.
 
         마커가 발이나 다리에 가려지면 중심의 실제 위치를 복원할 수 없으므로
         부분 사각형은 측정 보정에 사용하지 않는다.
         """
-        tag_markers = self._detect_apriltag_markers(image)
-        quadrilaterals = [points for _, points in tag_markers] if len(tag_markers) == 4 else self._marker_quadrilaterals(image)
+        quadrilaterals = self._ordered_marker_quadrilaterals(image)
         if len(quadrilaterals) != 4:
             return None
 
@@ -143,20 +162,15 @@ class OpenCVService:
 
     def _marker_scale_is_consistent(self, image: np.ndarray) -> bool:
         """마커 한 변 25 mm와 중심거리 배치가 사진에서 함께 성립하는지 확인한다."""
-        tag_markers = self._detect_apriltag_markers(image)
-        quadrilaterals = [points for _, points in tag_markers] if len(tag_markers) == 4 else self._marker_quadrilaterals(image)
+        quadrilaterals = self._ordered_marker_quadrilaterals(image)
         if len(quadrilaterals) != 4:
             return False
         centers = np.array([points.mean(axis=0) for points in quadrilaterals], dtype=np.float32)
         ordered_centers = self._order_points(centers)
-        ordered_quadrilaterals = [
-            min(quadrilaterals, key=lambda points: np.linalg.norm(points.mean(axis=0) - center))
-            for center in ordered_centers
-        ]
         destination_centers = self.marker_layout.destination_centers(self.PIXELS_PER_MM)
         matrix = cv2.getPerspectiveTransform(ordered_centers, destination_centers)
         side_lengths: list[float] = []
-        for quadrilateral in ordered_quadrilaterals:
+        for quadrilateral in quadrilaterals:
             corrected = cv2.perspectiveTransform(quadrilateral.reshape(-1, 1, 2), matrix).reshape(-1, 2)
             side_lengths.extend(
                 float(np.linalg.norm(corrected[(index + 1) % 4] - corrected[index]))
@@ -266,6 +280,146 @@ class OpenCVService:
             cutoff = min(int(round(leg_row[1])) + inset_px, height)
             trimmed[cutoff:, :] = 0
         return trimmed
+
+    def estimate_camera_pose(self, image: np.ndarray) -> dict[str, Any] | None:
+        """보정된 카메라와 평면 마커로부터 카메라 자세를 추정한다."""
+        if self.camera_calibration is None:
+            return None
+        image_size = (image.shape[1], image.shape[0])
+        if (
+            self.camera_calibration.image_size_px is not None
+            and self.camera_calibration.image_size_px != image_size
+        ):
+            return None
+        quadrilaterals = self._ordered_marker_quadrilaterals(image)
+        if len(quadrilaterals) != 4:
+            return None
+
+        marker_size = self.marker_layout.marker_size_mm
+        half_size = marker_size / 2.0
+        centers = self.marker_layout.destination_centers(pixels_per_mm=1.0)
+        local_corners = np.array(
+            [
+                [-half_size, -half_size, 0.0],
+                [half_size, -half_size, 0.0],
+                [half_size, half_size, 0.0],
+                [-half_size, half_size, 0.0],
+            ],
+            dtype=np.float64,
+        )
+        object_points = np.concatenate(
+            [local_corners + np.array([center[0], center[1], 0.0]) for center in centers]
+        )
+        image_points = np.concatenate(
+            [self._order_points(quadrilateral).astype(np.float64) for quadrilateral in quadrilaterals]
+        )
+        success, rotation_vector, translation_vector = cv2.solvePnP(
+            object_points,
+            image_points,
+            self.camera_calibration.camera_matrix,
+            self.camera_calibration.distortion_coefficients,
+            flags=cv2.SOLVEPNP_ITERATIVE,
+        )
+        if not success:
+            return None
+        projected, _ = cv2.projectPoints(
+            object_points,
+            rotation_vector,
+            translation_vector,
+            self.camera_calibration.camera_matrix,
+            self.camera_calibration.distortion_coefficients,
+        )
+        reprojection_error_px = float(
+            np.sqrt(np.mean(np.sum((projected.reshape(-1, 2) - image_points) ** 2, axis=1)))
+        )
+        if reprojection_error_px > self.MAX_POSE_REPROJECTION_ERROR_PX:
+            return None
+        rotation_matrix, _ = cv2.Rodrigues(rotation_vector)
+        camera_center = -rotation_matrix.T @ translation_vector
+        # The board coordinate system follows OpenCV image axes (x right, y down).
+        # Consequently a camera looking at z=0 is located at negative z, while a
+        # physical point elevated above the board has a negative board z value.
+        camera_height_mm = float(abs(camera_center[2, 0]))
+        if not np.isfinite(camera_height_mm) or camera_height_mm <= 0:
+            return None
+        return {
+            "rotation_vector": rotation_vector,
+            "translation_vector": translation_vector,
+            "camera_height_mm": camera_height_mm,
+            "reprojection_error_px": reprojection_error_px,
+        }
+
+    def _backproject_points_to_height(
+        self,
+        image_points: np.ndarray,
+        pose: dict[str, Any],
+        height_mm: float,
+    ) -> np.ndarray:
+        if self.camera_calibration is None:
+            raise MeasurementError("CAMERA_CALIBRATION_REQUIRED")
+        normalized = cv2.undistortPoints(
+            image_points.reshape(-1, 1, 2).astype(np.float64),
+            self.camera_calibration.camera_matrix,
+            self.camera_calibration.distortion_coefficients,
+        ).reshape(-1, 2)
+        camera_rays = np.column_stack((normalized, np.ones(len(normalized))))
+        rotation_matrix, _ = cv2.Rodrigues(pose["rotation_vector"])
+        translation_vector = pose["translation_vector"].reshape(3, 1)
+        camera_center = (-rotation_matrix.T @ translation_vector).reshape(3)
+        world_rays = camera_rays @ rotation_matrix
+        denominators = world_rays[:, 2]
+        # ``height_mm`` is a physical height above the marker plane. In this board
+        # coordinate convention that plane is z=-height_mm (towards the camera).
+        distances = (-height_mm - camera_center[2]) / denominators
+        valid = np.isfinite(distances) & (distances > 0)
+        if not np.all(valid):
+            raise MeasurementError("PARALLAX_BACKPROJECTION_FAILED")
+        world_points = camera_center + world_rays * distances[:, np.newaxis]
+        return world_points[:, :2].astype(np.float32)
+
+    def measure_mask_with_parallax(
+        self,
+        corrected_mask: np.ndarray,
+        perspective_matrix: np.ndarray,
+        pose: dict[str, Any],
+    ) -> dict[str, float | str | bool]:
+        """평면 보정 마스크를 유효 높이 평면으로 역투영해 길이와 폭을 계산한다."""
+        if self.camera_calibration is None:
+            raise MeasurementError("CAMERA_CALIBRATION_REQUIRED")
+        binary = (corrected_mask > 0).astype(np.uint8)
+        contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            raise MeasurementError("MEASUREMENT_FAILED")
+        contour = max(contours, key=cv2.contourArea)
+        if cv2.contourArea(contour) < 100:
+            raise MeasurementError("MEASUREMENT_FAILED")
+        inverse_matrix = np.linalg.inv(perspective_matrix)
+        source_points = cv2.perspectiveTransform(contour.astype(np.float32), inverse_matrix).reshape(-1, 2)
+
+        length_points = self._backproject_points_to_height(
+            source_points,
+            pose,
+            self.camera_calibration.length_effective_height_mm,
+        )
+        width_points = self._backproject_points_to_height(
+            source_points,
+            pose,
+            self.camera_calibration.width_effective_height_mm,
+        )
+        _, length_dimensions, _ = cv2.minAreaRect(length_points.reshape(-1, 1, 2))
+        _, width_dimensions, _ = cv2.minAreaRect(width_points.reshape(-1, 1, 2))
+        length_mm = max(length_dimensions)
+        width_mm = min(width_dimensions)
+        if length_mm <= 0 or width_mm <= 0:
+            raise MeasurementError("MEASUREMENT_FAILED")
+        return {
+            "foot_length_mm": round(float(length_mm), 1),
+            "foot_width_mm": round(float(width_mm), 1),
+            "parallax_correction_applied": True,
+            "camera_height_mm": round(float(pose["camera_height_mm"]), 1),
+            "camera_reprojection_error_px": round(float(pose["reprojection_error_px"]), 2),
+            "camera_calibration_version": self.camera_calibration.version,
+        }
 
     def correct_perspective(self, image: np.ndarray, mask: np.ndarray | None = None) -> dict[str, Any]:
         """마커 중심 간 실제 거리(가로 130 mm, 세로 216 mm)로 원근을 보정한다."""

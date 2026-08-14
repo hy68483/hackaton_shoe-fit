@@ -6,6 +6,7 @@ import numpy as np
 
 from app.core.config import settings
 
+from .camera_calibration import CameraCalibration
 from .opencv_service import ImageValidationError, MeasurementError, OpenCVService
 from .sam_service import SAMService, SegmentationError
 
@@ -14,7 +15,12 @@ class MeasurementService:
     def __init__(self, sam_service: SAMService | None = None, opencv_service: OpenCVService | None = None) -> None:
         # 테스트에서는 가짜 서비스 주입이 가능하고, 기본 실행은 실제 서비스로 구성한다.
         self.sam_service = sam_service or SAMService(model_path=settings.sam_model_path or None)
-        self.opencv_service = opencv_service or OpenCVService()
+        calibration = (
+            CameraCalibration.from_file(settings.camera_calibration_path)
+            if settings.camera_calibration_path
+            else None
+        )
+        self.opencv_service = opencv_service or OpenCVService(camera_calibration=calibration)
 
     def analyze_foot(self, image: np.ndarray, point_x: int, point_y: int) -> dict[str, float | bool | str]:
         """한쪽 발의 mm 치수 또는 문서화된 실패 코드를 반환한다."""
@@ -31,7 +37,22 @@ class MeasurementService:
                 negative_point=self.opencv_service.lower_leg_negative_point(image),
             )
             corrected = self.opencv_service.correct_perspective(image, segmentation["mask"])
-            dimensions = self.opencv_service.measure_mask(corrected["mask"], corrected["scale_mm_per_px"])
+            dimensions = {
+                **self.opencv_service.measure_mask(corrected["mask"], corrected["scale_mm_per_px"]),
+                "parallax_correction_applied": False,
+            }
+            pose = self.opencv_service.estimate_camera_pose(image)
+            if pose is not None:
+                try:
+                    dimensions = self.opencv_service.measure_mask_with_parallax(
+                        corrected["mask"],
+                        corrected["matrix"],
+                        pose,
+                    )
+                except MeasurementError:
+                    dimensions["parallax_correction_reason"] = "BACKPROJECTION_FAILED"
+            elif self.opencv_service.camera_calibration is not None:
+                dimensions["parallax_correction_reason"] = "POSE_UNAVAILABLE"
         except SegmentationError:
             # checkpoint·추론·mask 오류를 하나의 공개 실패 코드로 정규화한다.
             return {"success": False, "reason": "SEGMENTATION_FAILED"}

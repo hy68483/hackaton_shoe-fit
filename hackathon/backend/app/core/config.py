@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = Field(default=7, alias="REFRESH_TOKEN_EXPIRE_DAYS")
     cors_origins: str = Field(default="http://localhost:3000", alias="CORS_ORIGINS")
     sam_model_path: str = Field(default="", alias="SAM_MODEL_PATH")
+    camera_calibration_path: str = Field(default="", alias="CAMERA_CALIBRATION_PATH")
 
     model_config = SettingsConfigDict(
         env_file=".env",

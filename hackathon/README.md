@@ -135,3 +135,35 @@ must agree in the image; otherwise the API returns `MARKER_SCALE_MISMATCH`
 instead of a potentially incorrect measurement. A missing marker, insufficient
 brightness, or excessive blur also returns a retake reason before SAM inference
 starts.
+
+### Optional 2.5D Camera/Height Compensation
+
+The ordinary marker homography is exact only on the paper plane. Feet have
+height, so the backend can optionally use calibrated camera intrinsics and an
+effective measurement height to compensate for parallax. It never enables this
+path without `CAMERA_CALIBRATION_PATH`; when the variable is empty, the existing
+planar measurement path is retained unchanged.
+
+Calibrate every phone/camera and capture resolution separately. Take at least
+10 (preferably 15–25) sharp checkerboard photos with the same rear camera,
+lens/zoom, resolution, and approximate capture distance used for foot photos.
+The board must be flat and shown at varied positions and tilts. For a 9 by 6
+*inner-corner* board whose printed squares measure 20 mm:
+
+```powershell
+cd backend
+python scripts/calibrate_camera.py "calibration\*.jpg" --columns 9 --rows 6 --square-size-mm 20 --output camera_calibration.json
+```
+
+Set the generated file in `backend/.env`:
+
+```text
+CAMERA_CALIBRATION_PATH=camera_calibration.json
+```
+
+`length_effective_height_mm` and `width_effective_height_mm` are deliberately
+separate. Start with their defaults, then tune them against samples measured by
+a ruler or scanner; do not use a single global percentage multiplier. The
+measurement result internally records whether parallax correction was applied,
+the estimated camera height, and its reprojection error. If camera pose cannot
+be recovered, the service safely falls back to the original planar result.

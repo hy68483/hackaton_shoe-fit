@@ -3,6 +3,7 @@ import unittest
 import cv2
 import numpy as np
 
+from app.services.camera_calibration import CameraCalibration
 from app.services.opencv_service import OpenCVService
 
 
@@ -83,6 +84,63 @@ class OpenCVServiceTests(unittest.TestCase):
 
         self.assertAlmostEqual(measurement["foot_length_mm"], 100.0, delta=0.5)
         self.assertAlmostEqual(measurement["foot_width_mm"], 50.0, delta=0.5)
+
+    def test_parallax_measurement_recovers_a_raised_foot_shape(self) -> None:
+        camera_matrix = np.array([[1000.0, 0.0, 600.0], [0.0, 1000.0, 600.0], [0.0, 0.0, 1.0]])
+        calibration = CameraCalibration(
+            camera_matrix=camera_matrix,
+            distortion_coefficients=np.zeros(5),
+            length_effective_height_mm=20.0,
+            width_effective_height_mm=20.0,
+            version="synthetic-test",
+        )
+        service = OpenCVService(camera_calibration=calibration)
+        image = np.full((1400, 1400, 3), 230, dtype=np.uint8)
+        rotation_vector = np.zeros((3, 1), dtype=np.float64)
+        translation_vector = np.array([[0.0], [0.0], [500.0]])
+        centers = service.marker_layout.destination_centers(pixels_per_mm=1.0)
+        for center in centers:
+            corners = np.array(
+                [
+                    [center[0] - 12.5, center[1] - 12.5, 0.0],
+                    [center[0] + 12.5, center[1] - 12.5, 0.0],
+                    [center[0] + 12.5, center[1] + 12.5, 0.0],
+                    [center[0] - 12.5, center[1] + 12.5, 0.0],
+                ],
+                dtype=np.float32,
+            )
+            projected, _ = cv2.projectPoints(corners, rotation_vector, translation_vector, camera_matrix, np.zeros(5))
+            cv2.fillConvexPoly(image, np.rint(projected).astype(np.int32), (20, 20, 20))
+
+        foot_corners = np.array(
+            [[20.0, 30.0, -20.0], [110.0, 30.0, -20.0], [110.0, 280.0, -20.0], [20.0, 280.0, -20.0]],
+            dtype=np.float32,
+        )
+        projected_foot, _ = cv2.projectPoints(
+            foot_corners,
+            rotation_vector,
+            translation_vector,
+            camera_matrix,
+            np.zeros(5),
+        )
+        raw_mask = np.zeros(image.shape[:2], dtype=np.uint8)
+        cv2.fillConvexPoly(raw_mask, np.rint(projected_foot).astype(np.int32), 1)
+        corrected = service.correct_perspective(image)
+        corrected_mask = cv2.warpPerspective(
+            raw_mask,
+            corrected["matrix"],
+            (corrected["image"].shape[1], corrected["image"].shape[0]),
+            flags=cv2.INTER_NEAREST,
+        )
+
+        planar = service.measure_mask(corrected_mask, corrected["scale_mm_per_px"])
+        pose = service.estimate_camera_pose(image)
+        self.assertIsNotNone(pose)
+        compensated = service.measure_mask_with_parallax(corrected_mask, corrected["matrix"], pose)
+
+        self.assertGreater(planar["foot_length_mm"], 255.0)
+        self.assertAlmostEqual(compensated["foot_length_mm"], 250.0, delta=2.0)
+        self.assertAlmostEqual(compensated["foot_width_mm"], 90.0, delta=2.0)
 
 
 if __name__ == "__main__":
