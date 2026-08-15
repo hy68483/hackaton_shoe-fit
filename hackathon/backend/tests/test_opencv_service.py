@@ -10,9 +10,9 @@ from app.services.opencv_service import CheckerboardLayout, OpenCVService
 class OpenCVServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.service = OpenCVService()
-        self.image = np.full((1500, 1100, 3), 230, dtype=np.uint8)
-        # 5 px/mm 기준으로 중심 간 가로 130 mm, 세로 216 mm인 AprilTag 배치다.
-        for center in ((200, 200), (850, 200), (850, 1280), (200, 1280)):
+        self.image = np.full((1900, 1200, 3), 230, dtype=np.uint8)
+        # 5 px/mm 기준으로 중심 간 가로 175 mm, 세로 262 mm인 AprilTag 배치다.
+        for center in ((150, 200), (1025, 200), (1025, 1510), (150, 1510)):
             x, y = center
             cv2.rectangle(self.image, (x - 62, y - 62), (x + 62, y + 62), (20, 20, 20), -1)
 
@@ -22,7 +22,7 @@ class OpenCVServiceTests(unittest.TestCase):
         self.assertIsNotNone(centers)
         np.testing.assert_allclose(
             centers,
-            np.array([[200, 200], [850, 200], [850, 1280], [200, 1280]], dtype=np.float32),
+            np.array([[150, 200], [1025, 200], [1025, 1510], [150, 1510]], dtype=np.float32),
             atol=2,
         )
 
@@ -37,7 +37,7 @@ class OpenCVServiceTests(unittest.TestCase):
     def test_estimates_lower_leg_negative_point_from_bottom_markers(self) -> None:
         negative_point = self.service.lower_leg_negative_point(self.image)
 
-        self.assertEqual(negative_point, (525, 1496))
+        self.assertEqual(negative_point, (588, 1772))
 
     def test_uses_skin_coloured_marker_side_as_the_lower_leg_direction(self) -> None:
         image = np.full((1500, 1100, 3), 230, dtype=np.uint8)
@@ -66,7 +66,7 @@ class OpenCVServiceTests(unittest.TestCase):
 
         np.testing.assert_array_equal(
             destination,
-            np.array([[0, 0], [650, 0], [650, 1080], [0, 1080]], dtype=np.float32),
+            np.array([[0, 0], [875, 0], [875, 1310], [0, 1310]], dtype=np.float32),
         )
 
     def test_rejects_a_marker_with_an_obscured_corner(self) -> None:

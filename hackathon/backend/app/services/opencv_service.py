@@ -25,8 +25,8 @@ class MarkerLayout:
     """인쇄된 마커 중심의 실제 물리 배치(mm)다."""
 
     marker_size_mm: float = 25.0
-    horizontal_center_distance_mm: float = 130.0
-    vertical_center_distance_mm: float = 216.0
+    horizontal_center_distance_mm: float = 175.0
+    vertical_center_distance_mm: float = 262.0
 
     def destination_centers(self, pixels_per_mm: float) -> np.ndarray:
         """좌상, 우상, 우하, 좌하 순서의 균일한 축척 좌표를 반환한다."""
