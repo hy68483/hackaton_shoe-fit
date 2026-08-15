@@ -112,3 +112,34 @@ After promotion, log in again and use the new access token.
 ### AI Development Note
 
 SAM/OpenCV inference logic is intentionally not implemented in this backend branch. SAM model weights and PyTorch setup should be added later by the measurement pipeline owner.
+
+## Frontend
+
+The React mobile web frontend is in `front/`.
+
+### Install Dependencies
+
+```powershell
+cd front
+npm install
+```
+
+### Environment Variables
+
+Local settings go in `front/.env`. Do not commit `.env`; share only `front/.env.example`.
+
+```powershell
+copy .env.example .env
+```
+
+### Run React
+
+```powershell
+npm run dev
+```
+
+Default URL:
+
+```text
+http://127.0.0.1:5173
+```
