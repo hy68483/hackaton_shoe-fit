@@ -1,6 +1,6 @@
 # AGENTS.md
 
-- Use Python 3.14 for this project.
+- Use Python 3.12 for this project.
 - Backend architecture: router -> service -> repository -> database.
 - Base API URL: /api/v1.
 - Do not commit `.env`.
