@@ -4,7 +4,7 @@ Mobile web shoe shopping project with AI-assisted foot measurement and shoe size
 
 ## Backend
 
-Required Python: 3.14.x
+Required Python: 3.12.x
 
 The FastAPI backend is in `backend/`.
 
@@ -13,19 +13,19 @@ The FastAPI backend is in `backend/`.
 Run from the project root (`hackathon/`).
 
 ```powershell
-py -3.14 -m venv .venv
+py -3.12 -m venv backend\.venv
 ```
 
 PowerShell:
 
 ```powershell
-.venv\Scripts\Activate.ps1
+backend\.venv\Scripts\Activate.ps1
 ```
 
 CMD:
 
 ```bat
-.venv\Scripts\activate.bat
+backend\.venv\Scripts\activate.bat
 ```
 
 ### Install Dependencies
