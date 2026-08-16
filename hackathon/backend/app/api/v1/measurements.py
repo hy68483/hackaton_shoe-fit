@@ -9,6 +9,7 @@ from app.core.database import get_db_session
 from app.core.exceptions import api_error
 from app.schemas.measurements import (
     ImageUploadForm,
+    MeasurementBatchAnalysisRequest,
     MeasurementAnalysisRequest,
     MeasurementResultApply,
     MeasurementSessionCreate,
@@ -198,15 +199,33 @@ async def analyze_measurement_image(
         Depends(get_measurement_analysis_service),
     ],
 ) -> dict[str, object]:
-    await measurement_analysis_service.analyze(
+    result = await measurement_analysis_service.analyze(
         user_id=user_id,
         session_id=session_id,
         payload=payload,
     )
     return {
         "success": True,
-        "data": None,
+        "data": result.model_dump(),
     }
+
+
+@router.post("/sessions/{session_id}/analyze-batch")
+async def analyze_measurement_batch(
+    session_id: UUID,
+    payload: MeasurementBatchAnalysisRequest,
+    user_id: Annotated[UUID, Depends(get_current_user_id)],
+    measurement_analysis_service: Annotated[
+        MeasurementAnalysisService,
+        Depends(get_measurement_analysis_service),
+    ],
+) -> dict[str, object]:
+    result = await measurement_analysis_service.analyze_batch(
+        user_id=user_id,
+        session_id=session_id,
+        payload=payload,
+    )
+    return {"success": True, "data": result}
 
 
 @router.post("/sessions/{session_id}/result")

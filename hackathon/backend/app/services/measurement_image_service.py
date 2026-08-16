@@ -1,6 +1,7 @@
 from pathlib import Path
 from uuid import UUID, uuid4
 
+import cv2
 from fastapi import UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -111,10 +112,11 @@ class MeasurementImageService:
             )
 
         await self.measurement_repository.update_status(measurement, "VALIDATING")
-        checks = await self.opencv_service.validate_image_quality(
-            Path(measurement_image.original_key)
+        validation = self.opencv_service.validate_image(
+            cv2.imread(str(Path(measurement_image.original_key)))
         )
-        valid = all(checks.values())
+        checks = validation["checks"]
+        valid = bool(validation["valid"])
         next_status = "SEGMENTING" if valid else "RETAKE_REQUIRED"
         await self.measurement_repository.update_status(measurement, next_status)
 
@@ -122,7 +124,7 @@ class MeasurementImageService:
             valid=valid,
             checks=ImageQualityChecks(**checks),
             next_status=next_status,
-            reason=None if valid else self._first_failed_reason(checks),
+            reason=None if valid else str(validation["reason"]),
             message=None if valid else "Image quality validation failed. Please retake the photo.",
         )
 
