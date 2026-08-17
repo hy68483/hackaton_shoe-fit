@@ -167,3 +167,34 @@ a ruler or scanner; do not use a single global percentage multiplier. The
 measurement result internally records whether parallax correction was applied,
 the estimated camera height, and its reprojection error. If camera pose cannot
 be recovered, the service safely falls back to the original planar result.
+
+## Frontend
+
+The React mobile web frontend is in `front/`.
+
+### Install Dependencies
+
+```powershell
+cd front
+npm install
+```
+
+### Environment Variables
+
+Local settings go in `front/.env`. Do not commit `.env`; share only `front/.env.example`.
+
+```powershell
+copy .env.example .env
+```
+
+### Run React
+
+```powershell
+npm run dev
+```
+
+Default URL:
+
+```text
+http://127.0.0.1:5173
+```
