@@ -71,3 +71,13 @@ class MeasurementResultRead(BaseModel):
 class MeasurementAnalysisRequest(BaseModel):
     point_x: int = Field(ge=0)
     point_y: int = Field(ge=0)
+
+
+class MeasurementBatchShot(BaseModel):
+    image_id: UUID
+    point_x: int = Field(ge=0)
+    point_y: int = Field(ge=0)
+
+
+class MeasurementBatchAnalysisRequest(BaseModel):
+    shots: list[MeasurementBatchShot] = Field(min_length=2, max_length=3)
