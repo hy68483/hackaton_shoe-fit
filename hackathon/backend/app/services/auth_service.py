@@ -28,16 +28,26 @@ class AuthService:
         self.user_repository = UserRepository(session)
 
     async def signup(self, payload: UserCreate) -> tuple[UserRead, TokenPair]:
-        existing_user = await self.user_repository.get_by_email(payload.email)
+        existing_user = await self.user_repository.get_by_login_id(payload.login_id)
         if existing_user is not None:
             raise api_error(
                 409,
                 "BUSINESS_RULE_VIOLATION",
-                "Email is already in use.",
-                field="email",
+                "Login ID is already in use.",
+                field="login_id",
             )
+        if payload.email is not None:
+            existing_email_user = await self.user_repository.get_by_email(payload.email)
+            if existing_email_user is not None:
+                raise api_error(
+                    409,
+                    "BUSINESS_RULE_VIOLATION",
+                    "Email is already in use.",
+                    field="email",
+                )
 
         user = await self.user_repository.create(
+            login_id=payload.login_id,
             email=payload.email,
             password_hash=hash_password(payload.password),
             name=payload.name,
@@ -45,12 +55,15 @@ class AuthService:
         return self._to_user_read(user), self._create_token_pair(user)
 
     async def login(self, payload: UserLogin) -> LoginResponse:
-        user = await self.user_repository.get_by_email(payload.email)
+        if "@" in payload.login_id:
+            user = await self.user_repository.get_by_email(payload.login_id)
+        else:
+            user = await self.user_repository.get_by_login_id(payload.login_id)
         if user is None or not verify_password(payload.password, user.password_hash):
             raise api_error(
                 401,
                 "UNAUTHORIZED",
-                "Email or password is incorrect.",
+                "Login ID, email, or password is incorrect.",
             )
 
         token_pair = self._create_token_pair(user)
@@ -113,6 +126,7 @@ class AuthService:
     def _to_user_read(self, user: User) -> UserRead:
         return UserRead(
             id=str(user.id),
+            login_id=user.login_id,
             name=user.name,
             email=user.email,
             role=user.role,

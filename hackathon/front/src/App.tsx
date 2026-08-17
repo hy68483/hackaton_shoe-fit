@@ -16,9 +16,14 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link, NavLink, Route, Routes, useNavigate } from "react-router-dom";
+import { login, signup } from "./api/auth";
 import authStartImage from "./assets/auth-start.png";
 
 const carriers = ["SKT", "KT", "LG U+", "SKT 알뜰폰", "KT 알뜰폰", "LG U+ 알뜰폰"];
+const SIGNUP_NAME_KEY = "shoefit.signup.name";
+const SIGNUP_LOGIN_ID_KEY = "shoefit.signup.loginId";
+const AUTH_ACCESS_TOKEN_KEY = "shoefit.auth.accessToken";
+const AUTH_REFRESH_TOKEN_KEY = "shoefit.auth.refreshToken";
 
 const featuredProducts = [
   {
@@ -327,7 +332,14 @@ function IdentityVerificationPage() {
 
           <button
             type="button"
-            onClick={verificationSent ? () => navigate("/signup/id") : requestVerificationCode}
+            onClick={
+              verificationSent
+                ? () => {
+                    localStorage.setItem(SIGNUP_NAME_KEY, name.trim());
+                    navigate("/signup/id");
+                  }
+                : requestVerificationCode
+            }
             disabled={verificationSent ? !canConfirm : !canRequestCode}
             className="mt-auto mb-8 flex h-[58px] w-full items-center justify-center rounded-[12px] bg-[#4640DE] text-[16px] font-bold text-white disabled:bg-[#c7c2f5]"
           >
@@ -374,8 +386,8 @@ function IdentityVerificationPage() {
 
 function SignupIdPage() {
   const navigate = useNavigate();
-  const [loginId, setLoginId] = useState("");
-  const isValid = loginId.trim().length >= 5;
+  const [loginId, setLoginId] = useState(() => localStorage.getItem(SIGNUP_LOGIN_ID_KEY) ?? "");
+  const isValid = normalizeLoginId(loginId).length >= 5;
 
   return (
     <AuthPageFrame backTo="/signup">
@@ -405,7 +417,10 @@ function SignupIdPage() {
 
         <button
           type="button"
-          onClick={() => navigate("/signup/password")}
+          onClick={() => {
+            localStorage.setItem(SIGNUP_LOGIN_ID_KEY, normalizeLoginId(loginId));
+            navigate("/signup/password");
+          }}
           disabled={!isValid}
           className="mt-auto mb-8 flex h-[58px] w-full items-center justify-center rounded-[12px] bg-[#4640DE] text-[16px] font-bold text-white disabled:bg-[#c7c2f5]"
         >
@@ -422,11 +437,43 @@ function SignupPasswordPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
   const hasPassword = password.length > 0;
   const passwordValid = password.length >= 8;
   const confirmValid = confirmPassword.length > 0 && password === confirmPassword;
   const showPasswordError = hasPassword && !passwordValid;
   const canContinue = passwordValid && confirmValid;
+
+  async function submitSignup() {
+    if (!canContinue || submitting) return;
+
+    const loginId = localStorage.getItem(SIGNUP_LOGIN_ID_KEY) ?? "";
+    const name = localStorage.getItem(SIGNUP_NAME_KEY) || "ShoeFit User";
+    if (!loginId) {
+      setSubmitError("아이디를 먼저 입력해 주세요.");
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+      setSubmitError("");
+      const normalizedLoginId = normalizeLoginId(loginId);
+      const response = await signup({
+        login_id: getSignupLoginId(normalizedLoginId),
+        email: isEmailLike(normalizedLoginId) ? normalizedLoginId : null,
+        password,
+        name,
+      });
+      localStorage.setItem(AUTH_ACCESS_TOKEN_KEY, response.data.access_token);
+      localStorage.setItem(AUTH_REFRESH_TOKEN_KEY, response.data.refresh_token);
+      navigate("/signup/complete");
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : "회원가입에 실패했습니다.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   return (
     <AuthPageFrame backTo="/signup/id">
@@ -473,12 +520,17 @@ function SignupPasswordPage() {
 
         <button
           type="button"
-          onClick={() => navigate("/signup/complete")}
-          disabled={!canContinue}
+          onClick={submitSignup}
+          disabled={!canContinue || submitting}
           className="mt-auto mb-8 flex h-[58px] w-full items-center justify-center rounded-[12px] bg-[#4640DE] text-[16px] font-bold text-white disabled:bg-[#c7c2f5]"
         >
-          다음
+          {submitting ? "가입 중..." : "다음"}
         </button>
+        {submitError && (
+          <p className="-mt-6 mb-5 text-center text-[12px] font-bold text-[#ff4b64]">
+            {submitError}
+          </p>
+        )}
       </form>
     </AuthPageFrame>
   );
@@ -519,7 +571,29 @@ function LoginPage() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [rememberLogin, setRememberLogin] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [loginError, setLoginError] = useState("");
   const canLogin = loginId.trim().length > 0 && password.length > 0;
+
+  async function submitLogin() {
+    if (!canLogin || submitting) return;
+
+    try {
+      setSubmitting(true);
+      setLoginError("");
+      const response = await login({
+        login_id: normalizeLoginId(loginId),
+        password,
+      });
+      localStorage.setItem(AUTH_ACCESS_TOKEN_KEY, response.data.access_token);
+      localStorage.setItem(AUTH_REFRESH_TOKEN_KEY, response.data.refresh_token);
+      navigate("/home");
+    } catch (error) {
+      setLoginError(error instanceof Error ? error.message : "로그인에 실패했습니다.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   return (
     <AuthPageFrame backTo="/">
@@ -566,12 +640,17 @@ function LoginPage() {
 
         <button
           type="button"
-          onClick={() => navigate("/home")}
-          disabled={!canLogin}
+          onClick={submitLogin}
+          disabled={!canLogin || submitting}
           className="mt-auto mb-8 flex h-[58px] w-full items-center justify-center rounded-[12px] bg-[#4640DE] text-[16px] font-bold text-white disabled:bg-[#c7c2f5]"
         >
-          로그인
+          {submitting ? "로그인 중..." : "로그인"}
         </button>
+        {loginError && (
+          <p className="-mt-6 mb-5 text-center text-[12px] font-bold text-[#ff4b64]">
+            {loginError}
+          </p>
+        )}
       </form>
     </AuthPageFrame>
   );
@@ -675,6 +754,21 @@ function AuthStatusBar() {
 
 function onlyDigits(value: string, maxLength: number) {
   return value.replace(/\D/g, "").slice(0, maxLength);
+}
+
+function normalizeLoginId(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function isEmailLike(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function getSignupLoginId(value: string) {
+  if (!isEmailLike(value)) {
+    return value;
+  }
+  return value.split("@", 1)[0];
 }
 
 function HomePage() {
