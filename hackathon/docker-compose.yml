@@ -1,0 +1,48 @@
+services:
+  db:
+    image: postgres:16
+    container_name: shoe-fit-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-shoefit}
+      POSTGRES_USER: ${POSTGRES_USER:-shoefit}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-shoefit_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-shoefit} -d ${POSTGRES_DB:-shoefit}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+    container_name: shoe-fit-backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-shoefit}:${POSTGRES_PASSWORD:-shoefit_password}@db:5432/${POSTGRES_DB:-shoefit}
+    volumes:
+      - ./backend/model:/app/model:ro
+      - ./backend/output:/app/output
+    depends_on:
+      db:
+        condition: service_healthy
+    expose:
+      - "8000"
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: shoe-fit-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
