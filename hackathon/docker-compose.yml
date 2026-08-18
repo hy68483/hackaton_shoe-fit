@@ -33,16 +33,23 @@ services:
     expose:
       - "8000"
 
-  nginx:
-    image: nginx:1.27-alpine
-    container_name: shoe-fit-nginx
+  caddy:
+    image: caddy:2.8-alpine
+    container_name: shoe-fit-caddy
     restart: unless-stopped
     ports:
       - "80:80"
+      - "443:443"
     volumes:
-      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      API_HOST: ${API_HOST:-1.201.116.154.sslip.io}
     depends_on:
       - backend
 
 volumes:
   postgres_data:
+  caddy_data:
+  caddy_config:
