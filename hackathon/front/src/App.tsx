@@ -1025,20 +1025,20 @@ function IdentityVerificationPage() {
               )}
             </div>
 
-            <div className="grid grid-cols-[1fr_34px_1fr] items-center gap-2">
+            <div className="grid grid-cols-[minmax(0,1fr)_18px_96px] items-center gap-1.5">
               <input
                 value={birthDate}
                 onChange={(event) =>
                   setBirthDate(onlyDigits(event.target.value, 6))
                 }
                 inputMode="numeric"
-                className="h-[50px] rounded-[8px] border border-[#eceaf5] bg-white px-4 text-[15px] font-semibold text-black outline-none placeholder:text-[#b9b8c2] focus:border-[#4640DE]"
+                className="h-[50px] min-w-0 rounded-[8px] border border-[#eceaf5] bg-white px-3 text-[15px] font-semibold text-black outline-none placeholder:text-[#b9b8c2] focus:border-[#4640DE]"
                 placeholder="주민번호"
               />
-              <span className="text-center text-[22px] font-light text-[#1b1b1f]">
+              <span className="text-center text-[18px] font-light text-[#1b1b1f]">
                 -
               </span>
-              <div className="relative flex h-[50px] items-center gap-2">
+              <div className="relative flex h-[50px] min-w-0 items-center gap-1.5 overflow-hidden">
                 <input
                   value={residentBackNumber}
                   onChange={(event) =>
@@ -1051,13 +1051,13 @@ function IdentityVerificationPage() {
                   aria-label="주민번호 뒤 7자리"
                 />
                 <div
-                  className="flex h-[50px] w-[44px] items-center justify-center rounded-[8px] border border-[#eceaf5] bg-white text-[15px] font-semibold text-black"
+                  className="flex h-[50px] w-[42px] shrink-0 items-center justify-center rounded-[8px] border border-[#eceaf5] bg-white text-[15px] font-semibold text-black"
                   aria-hidden="true"
                 >
                   {residentBackNumber[0] ?? ""}
                 </div>
                 <div
-                  className="flex h-[50px] flex-1 items-center text-left tracking-[4px] text-[#65616b]"
+                  className="flex h-[50px] min-w-0 flex-1 items-center overflow-hidden text-left text-[13px] tracking-[2px] text-[#65616b]"
                   aria-hidden="true"
                 >
                   {residentBackNumber.length > 1
