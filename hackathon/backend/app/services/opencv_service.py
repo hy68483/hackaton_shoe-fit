@@ -306,8 +306,10 @@ class OpenCVService:
             "marker": marker_ok,
             "perspective": marker_scale_ok,
         }
-        if not brightness_ok:
+        if brightness < self.MIN_BRIGHTNESS:
             return {"valid": False, "reason": "IMAGE_TOO_DARK", "checks": checks}
+        if brightness > self.MAX_BRIGHTNESS:
+            return {"valid": False, "reason": "IMAGE_TOO_BRIGHT", "checks": checks}
         if not blur_ok:
             return {"valid": False, "reason": "IMAGE_BLUR", "checks": checks}
         if not marker_ok:

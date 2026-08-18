@@ -115,7 +115,15 @@ class MeasurementImageService:
         validation = self.opencv_service.validate_image(
             cv2.imread(str(Path(measurement_image.original_key)))
         )
-        checks = validation["checks"]
+        checks = {
+            "measurement_sheet": False,
+            "foot_complete": False,
+            "blur": False,
+            "brightness": False,
+            "marker": False,
+            "perspective": False,
+            **validation.get("checks", {}),
+        }
         valid = bool(validation["valid"])
         next_status = "SEGMENTING" if valid else "RETAKE_REQUIRED"
         await self.measurement_repository.update_status(measurement, next_status)
