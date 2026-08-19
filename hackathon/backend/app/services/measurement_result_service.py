@@ -39,12 +39,14 @@ class MeasurementResultService:
             measurement=measurement,
             foot_length_mm=Decimal(str(payload.foot_length_mm)),
             foot_width_mm=Decimal(str(payload.foot_width_mm)),
+            foot_side=payload.foot_side or "RIGHT",
             segmentation_confidence=confidence,
         )
         await self.foot_profile_repository.upsert(
             user_id=user_id,
             length_mm=result.foot_length_mm,
             width_mm=result.foot_width_mm,
+            foot_side=result.foot_side or "RIGHT",
             confidence=result.segmentation_confidence,
             measurement_id=measurement.id,
             measured_at=result.measured_at,
@@ -84,6 +86,7 @@ class MeasurementResultService:
             session_id=str(measurement.session_id),
             foot_length_mm=float(result.foot_length_mm),
             foot_width_mm=float(result.foot_width_mm),
+            foot_side=getattr(result, "foot_side", "RIGHT") or "RIGHT",
             segmentation_confidence=(
                 float(result.segmentation_confidence)
                 if result.segmentation_confidence is not None

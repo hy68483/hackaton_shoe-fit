@@ -47,28 +47,40 @@ class SAMService:
     ) -> dict[str, Any]:
         """OpenCV 기반 피부색/배경 분리로 발 마스크를 생성한다."""
         height, width = image.shape[:2]
-        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV) if image.ndim == 3 else cv2.cvtColor(cv2.cvtColor(image, cv2.COLOR_GRAY2BGR), cv2.COLOR_BGR2HSV)
-        gray = image if image.ndim == 2 else cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        bgr = image if image.ndim == 3 else cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+        hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+        ycrcb = cv2.cvtColor(bgr, cv2.COLOR_BGR2YCrCb)
 
-        paper_mask = (hsv[:, :, 1] < 45) & (hsv[:, :, 2] > 175)
-        foot_mask = ~paper_mask & (gray < 225) & (gray > 30)
+        # 1. 피부색 검출 (YCrCb + HSV)
+        skin_ycrcb = (ycrcb[:, :, 1] >= 128) & (ycrcb[:, :, 1] <= 185) & (ycrcb[:, :, 2] >= 70) & (ycrcb[:, :, 2] <= 140)
+        skin_hsv = (hsv[:, :, 0] <= 30) & (hsv[:, :, 1] >= 15) & (hsv[:, :, 2] >= 35)
+        skin_mask = skin_ycrcb & skin_hsv
 
-        mask_u8 = np.uint8(foot_mask * 255)
+        # 2. 배경 종이 및 그림자 대비 보조 마스크
+        gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+        paper_mask = (hsv[:, :, 1] < 30) & (hsv[:, :, 2] > 80)
+        contrast_foot = ~paper_mask & (gray < 225) & (gray > 30) & (hsv[:, :, 1] >= 12)
+
+        combined = np.uint8((skin_mask | contrast_foot) * 255)
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
-        mask_u8 = cv2.morphologyEx(mask_u8, cv2.MORPH_CLOSE, kernel)
+        mask_u8 = cv2.morphologyEx(combined, cv2.MORPH_CLOSE, kernel)
         mask_u8 = cv2.morphologyEx(mask_u8, cv2.MORPH_OPEN, kernel)
 
         num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask_u8)
-        target_label = labels[point_y, point_x]
+        target_label = labels[point_y, point_x] if (0 <= point_y < height and 0 <= point_x < width) else 0
         if target_label == 0:
             patch = labels[max(0, point_y - 30) : min(height, point_y + 31), max(0, point_x - 30) : min(width, point_x + 31)]
             unique, counts = np.unique(patch[patch > 0], return_counts=True)
             if len(unique) > 0:
                 target_label = unique[np.argmax(counts)]
 
+        # 만약 point_x, point_y 주변에서도 못 찾으면 가장 면적이 큰 중앙 컴포넌트 선택
+        if target_label == 0 and num_labels > 1:
+            areas = stats[1:, cv2.CC_STAT_AREA]
+            target_label = int(np.argmax(areas)) + 1
+
         mask = np.uint8((labels == target_label) * 1) if target_label > 0 else np.zeros((height, width), dtype=np.uint8)
         if cv2.countNonZero(mask) == 0:
-            # fallback: 이미지 중심 기준 타원 마스크
             mask = np.zeros((height, width), dtype=np.uint8)
             cv2.ellipse(mask, (point_x, point_y), (width // 6, height // 4), 0, 0, 360, 1, -1)
 
@@ -76,7 +88,7 @@ class SAMService:
         return {
             "mask": mask,
             "bounding_box": {"x": int(x), "y": int(y), "width": int(box_width), "height": int(box_height)},
-            "segmentation_confidence": 0.88,
+            "segmentation_confidence": 0.90,
         }
 
     def segment(

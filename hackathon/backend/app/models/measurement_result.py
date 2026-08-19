@@ -3,7 +3,7 @@ from decimal import Decimal
 from uuid import UUID as PyUUID
 from uuid import uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Numeric, UniqueConstraint, func
+from sqlalchemy import DateTime, ForeignKey, Numeric, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -25,6 +25,7 @@ class MeasurementResult(Base):
     )
     foot_length_mm: Mapped[Decimal] = mapped_column(Numeric(8, 2), nullable=False)
     foot_width_mm: Mapped[Decimal] = mapped_column(Numeric(8, 2), nullable=False)
+    foot_side: Mapped[str | None] = mapped_column(String(10), nullable=True, default="RIGHT")
     segmentation_confidence: Mapped[Decimal | None] = mapped_column(Numeric(4, 3), nullable=True)
     measured_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

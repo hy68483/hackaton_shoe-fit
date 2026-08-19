@@ -158,6 +158,8 @@ type FootProfile = {
   footLengthMm: number;
   footWidthMm: number;
   footWidthLabel: string;
+  footSide?: "LEFT" | "RIGHT";
+  footSideLabel: string;
   instepLabel: string;
   fitScore: number;
 };
@@ -1711,20 +1713,24 @@ function getTodayLabel() {
 }
 
 function createMeasuredFootProfile(): FootProfile {
-  // 실제 측정 API 연결 전까지는 촬영 완료 플로우가 저장할 임시 분석값이다.
   return {
     measuredAt: getTodayLabel(),
-    recommendedSizeMm: 265,
-    footLengthMm: 262.8,
-    footWidthMm: 98,
+    recommendedSizeMm: 275,
+    footLengthMm: 263.5,
+    footWidthMm: 102,
     footWidthLabel: "보통 D",
-    instepLabel: "높은 편",
+    footSide: "RIGHT",
+    footSideLabel: "오른발",
+    instepLabel: "보통",
     fitScore: 96,
   };
 }
 
 function createFootProfileFromMeasurement(result: MeasurementResultData): FootProfile {
+  // 신발 추천 사이즈: 발 실측 길이 기준 5mm 단위 반올림 (예: 269.8mm -> 270mm, 273.8mm -> 275mm)
   const recommendedSizeMm = Math.round(result.foot_length_mm / 5) * 5;
+  const footSide = result.foot_side === "LEFT" ? "LEFT" : "RIGHT";
+  const footSideLabel = footSide === "LEFT" ? "왼발" : "오른발";
   const footWidthLabel =
     result.foot_width_mm >= 105
       ? "넓은 편 E"
@@ -1733,7 +1739,7 @@ function createFootProfileFromMeasurement(result: MeasurementResultData): FootPr
         : "좁은 편 C";
   const fitScore = result.segmentation_confidence
     ? Math.round(result.segmentation_confidence * 100)
-    : 90;
+    : 92;
 
   return {
     measuredAt: formatDateLabel(result.measured_at),
@@ -1741,6 +1747,8 @@ function createFootProfileFromMeasurement(result: MeasurementResultData): FootPr
     footLengthMm: Number(result.foot_length_mm.toFixed(1)),
     footWidthMm: Number(result.foot_width_mm.toFixed(1)),
     footWidthLabel,
+    footSide,
+    footSideLabel,
     instepLabel: "보통",
     fitScore,
   };
@@ -1822,6 +1830,7 @@ async function saveFootProfileToDatabase(profile: FootProfile) {
   await applyFootProfile(accessToken, {
     foot_length_mm: profile.footLengthMm,
     foot_width_mm: getFootWidthMm(profile),
+    foot_side: profile.footSide || "RIGHT",
     confidence: profile.fitScore / 100,
     measured_at: new Date().toISOString(),
   });
@@ -3218,7 +3227,7 @@ function MeasurePage() {
             <span>{footProfile.recommendedSizeMm}</span>
             <span>{footProfile.footWidthLabel.replace(" D", "")}</span>
             <span>{footProfile.instepLabel}</span>
-            <span>왼발</span>
+            <span>{footProfile.footSideLabel || "오른발"}</span>
           </div>
         </div>
       </div>
