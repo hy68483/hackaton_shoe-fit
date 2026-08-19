@@ -168,6 +168,45 @@ measurement result internally records whether parallax correction was applied,
 the estimated camera height, and its reprojection error. If camera pose cannot
 be recovered, the service safely falls back to the original planar result.
 
+## Deployment Checklist
+
+Before deploying, merge the working branch into `develop` and deploy from the branch agreed by the team.
+
+Frontend:
+
+```powershell
+cd front
+npm install
+npm run build
+```
+
+Deploy `front/dist` to the static web server. Set `VITE_API_BASE_URL` before building so the deployed frontend calls the real backend, not `127.0.0.1`.
+
+Backend:
+
+```powershell
+cd backend
+py -3.12 -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+Production `backend/.env` must include:
+
+```text
+DATABASE_URL=postgresql+asyncpg://USER:PASSWORD@HOST:5432/DB_NAME
+JWT_SECRET=change-this-to-a-long-random-secret
+JWT_ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+REFRESH_TOKEN_EXPIRE_DAYS=7
+CORS_ORIGINS=https://your-frontend-domain.com
+SAM_MODEL_PATH=/absolute/path/to/sam_vit_b_01ec64.pth
+CAMERA_CALIBRATION_PATH=
+```
+
+Do not commit `.env`, `.venv`, `backend/model/`, `.pth`, or `.pt` files.
+
 ## Frontend
 
 The React mobile web frontend is in `front/`.
@@ -187,6 +226,12 @@ Local settings go in `front/.env`. Do not commit `.env`; share only `front/.env.
 copy .env.example .env
 ```
 
+For production, set `VITE_API_BASE_URL` to the public backend API URL before building:
+
+```text
+VITE_API_BASE_URL=https://your-api-domain.com/api/v1
+```
+
 ### Run React
 
 ```powershell
@@ -198,3 +243,11 @@ Default URL:
 ```text
 http://127.0.0.1:5173
 ```
+
+### Build React
+
+```powershell
+npm run build
+```
+
+The static deployment output is created in `front/dist`.
