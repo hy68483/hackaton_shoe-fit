@@ -4,6 +4,7 @@ import type { ApiResponse } from '../types/api'
 export type FootProfileData = {
   foot_length_mm: number
   foot_width_mm: number
+  foot_side?: string | null
   confidence: number | null
   measurement_id: string | null
   measured_at: string | null
@@ -15,6 +16,7 @@ export function applyFootProfile(
     measurement_id?: string | null
     foot_length_mm: number
     foot_width_mm: number
+    foot_side?: string | null
     confidence?: number | null
     measured_at?: string | null
   },

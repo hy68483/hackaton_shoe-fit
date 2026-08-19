@@ -69,8 +69,16 @@ class MeasurementService:
         except MeasurementError:
             # contour가 없거나 길이·발볼을 계산할 수 없으면 측정 실패를 반환한다.
             return {"success": False, "reason": "MEASUREMENT_FAILED"}
-        # 성공 응답에는 문서에서 요구한 세 개의 측정값만 포함한다.
-        return {**dimensions, "segmentation_confidence": float(segmentation["segmentation_confidence"])}
+        
+        foot_side = self.opencv_service.detect_foot_side(
+            corrected["mask"],
+            corrected.get("transformed_reference_points"),
+        )
+        return {
+            **dimensions,
+            "foot_side": foot_side,
+            "segmentation_confidence": float(segmentation["segmentation_confidence"]),
+        }
 
     @classmethod
     def aggregate_measurements(

@@ -27,6 +27,7 @@ class ProfileService:
             user_id=user_id,
             length_mm=Decimal(str(payload.foot_length_mm)),
             width_mm=Decimal(str(payload.foot_width_mm)),
+            foot_side=payload.foot_side or "RIGHT",
             confidence=(
                 Decimal(str(payload.confidence))
                 if payload.confidence is not None
@@ -44,6 +45,7 @@ class ProfileService:
         return FootProfileRead(
             foot_length_mm=float(foot_profile.length_mm),
             foot_width_mm=float(foot_profile.width_mm),
+            foot_side=getattr(foot_profile, "foot_side", "RIGHT") or "RIGHT",
             confidence=(
                 float(foot_profile.confidence)
                 if foot_profile.confidence is not None
