@@ -553,15 +553,53 @@ class OpenCVService:
         bottom_row = np.array((center_x, max_y), dtype=np.float32)
         leg_row = min((top_row, bottom_row), key=lambda row: np.linalg.norm(row - transformed_negative_point))
         inset_px = int(round(self.ANKLE_CUTOFF_INSET_MM * self.PIXELS_PER_MM))
+        
         trimmed = mask.copy()
         height = trimmed.shape[0]
         if leg_row[1] < height / 2:
             cutoff = max(int(round(leg_row[1])) - inset_px, 0)
             trimmed[:cutoff, :] = 0
         else:
-            cutoff = min(int(round(leg_row[1])) + inset_px, height)
+            # 하단 마커 라인을 기준으로 발뒤꿈치 아래로 뻗은 하퇴를 정확히 절삭
+            cutoff = min(int(round(leg_row[1])), height)
             trimmed[cutoff:, :] = 0
+            
         return trimmed
+
+    def detect_foot_side(
+        self,
+        mask: np.ndarray | None,
+        transformed_reference_points: np.ndarray | None = None,
+    ) -> str:
+        """원근 보정된 발 마스크에서 엄지발가락 위치를 기반으로 오른발/왼발을 자동 판별한다."""
+        if mask is None or mask.size == 0 or cv2.countNonZero(mask) == 0:
+            return "RIGHT"
+        pts = np.argwhere(mask > 0)
+        top_y = float(pts[:, 0].min())
+        
+        if transformed_reference_points is not None:
+            ref_pts = np.asarray(transformed_reference_points, dtype=np.float32).reshape(-1, 2)
+            top_marker_y = float(np.min(ref_pts[:, 1]))
+            center_x = float(np.mean(ref_pts[:, 0]))
+            toe_cutoff_y = max(top_marker_y + 120.0, top_y + 160.0)
+            toe_pts = pts[(pts[:, 0] >= top_y) & (pts[:, 0] <= toe_cutoff_y)]
+        else:
+            toe_pts = pts[pts[:, 0] <= top_y + 180]
+            center_x = float(np.mean(toe_pts[:, 1])) if len(toe_pts) > 0 else float(mask.shape[1] / 2)
+            
+        if len(toe_pts) == 0:
+            return "RIGHT"
+
+        left_toes = toe_pts[toe_pts[:, 1] < center_x]
+        right_toes = toe_pts[toe_pts[:, 1] >= center_x]
+        left_min_y = float(np.min(left_toes[:, 0])) if len(left_toes) > 0 else 9999.0
+        right_min_y = float(np.min(right_toes[:, 0])) if len(right_toes) > 0 else 9999.0
+
+        # 엄지발가락 쪽이 더 위쪽(작은 y)까지 뻗어있음
+        # 엄지발가락이 좌측에 있으면 오른발(RIGHT), 우측에 있으면 왼발(LEFT)
+        if left_min_y < right_min_y:
+            return "RIGHT"
+        return "LEFT"
 
     def estimate_camera_pose(self, image: np.ndarray) -> dict[str, Any] | None:
         """보정된 카메라와 평면 마커로부터 카메라 자세를 추정한다."""
@@ -728,15 +766,15 @@ class OpenCVService:
         output_size = (max(max_x - min_x + 1, 1), max(max_y - min_y + 1, 1))
         corrected = cv2.warpPerspective(image, matrix, output_size)
         corrected_mask = None
+        transformed_reference_points = cv2.perspectiveTransform(
+            np.asarray(reference["source"], dtype=np.float32).reshape(-1, 1, 2), matrix
+        ).reshape(-1, 2)
         if mask is not None:
             corrected_mask = cv2.warpPerspective(
                 mask.astype(np.uint8), matrix, output_size, flags=cv2.INTER_NEAREST
             )
             leg_negative_point = self.lower_leg_negative_point(image)
             if leg_negative_point is not None:
-                transformed_reference_points = cv2.perspectiveTransform(
-                    np.asarray(reference["source"], dtype=np.float32).reshape(-1, 1, 2), matrix
-                ).reshape(-1, 2)
                 transformed_negative_point = cv2.perspectiveTransform(
                     np.array([[leg_negative_point]], dtype=np.float32), matrix
                 ).reshape(2)
@@ -749,6 +787,7 @@ class OpenCVService:
             "image": corrected,
             "mask": corrected_mask,
             "matrix": matrix,
+            "transformed_reference_points": transformed_reference_points,
             "scale_mm_per_px": 1.0 / self.PIXELS_PER_MM,
         }
 

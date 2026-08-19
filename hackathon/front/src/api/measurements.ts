@@ -47,6 +47,7 @@ export type MeasurementResultData = {
   session_id: string
   foot_length_mm: number
   foot_width_mm: number
+  foot_side?: string | null
   segmentation_confidence: number | null
   status: string
   measured_at: string
@@ -139,11 +140,13 @@ export function analyzeMeasurementImage({
   sessionId,
   pointX,
   pointY,
+  footSide = 'RIGHT',
 }: {
   accessToken: string
   sessionId: string
   pointX: number
   pointY: number
+  footSide?: string
 }) {
   return apiRequest<ApiResponse<MeasurementResultData>>(
     `/measurements/sessions/${sessionId}/analyze`,
@@ -153,6 +156,7 @@ export function analyzeMeasurementImage({
       body: JSON.stringify({
         point_x: pointX,
         point_y: pointY,
+        foot_side: footSide,
       }),
     },
   )

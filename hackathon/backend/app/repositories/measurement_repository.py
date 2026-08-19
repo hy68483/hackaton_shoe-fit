@@ -123,6 +123,7 @@ class MeasurementRepository:
         measurement: Measurement,
         foot_length_mm: Decimal,
         foot_width_mm: Decimal,
+        foot_side: str | None = "RIGHT",
         segmentation_confidence: Decimal | None,
     ) -> MeasurementResult:
         result = await self.get_result(measurement.id)
@@ -132,6 +133,7 @@ class MeasurementRepository:
 
         result.foot_length_mm = foot_length_mm
         result.foot_width_mm = foot_width_mm
+        result.foot_side = foot_side or "RIGHT"
         result.segmentation_confidence = segmentation_confidence
         result.measured_at = datetime.now(timezone.utc)
         measurement.confidence = segmentation_confidence
