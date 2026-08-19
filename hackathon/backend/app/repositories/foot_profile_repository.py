@@ -24,6 +24,7 @@ class FootProfileRepository:
         user_id: UUID,
         length_mm: Decimal,
         width_mm: Decimal,
+        foot_side: str | None = "RIGHT",
         confidence: Decimal | None,
         measurement_id: UUID | None,
         measured_at: datetime | None,
@@ -35,6 +36,7 @@ class FootProfileRepository:
 
         foot_profile.length_mm = length_mm
         foot_profile.width_mm = width_mm
+        foot_profile.foot_side = foot_side or "RIGHT"
         foot_profile.confidence = confidence
         foot_profile.measurement_id = measurement_id
         foot_profile.measured_at = measured_at

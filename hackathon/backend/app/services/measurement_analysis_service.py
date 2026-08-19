@@ -73,6 +73,7 @@ class MeasurementAnalysisService:
             payload=MeasurementResultApply(
                 foot_length_mm=float(analysis["foot_length_mm"]),
                 foot_width_mm=float(analysis["foot_width_mm"]),
+                foot_side=str(analysis.get("foot_side") or payload.foot_side or "RIGHT"),
                 segmentation_confidence=float(analysis["segmentation_confidence"]),
             ),
         )
@@ -135,6 +136,7 @@ class MeasurementAnalysisService:
                 "image_id": str(shot.image_id),
                 "foot_length_mm": analysis["foot_length_mm"],
                 "foot_width_mm": analysis["foot_width_mm"],
+                "foot_side": analysis.get("foot_side", "RIGHT"),
                 "segmentation_confidence": analysis["segmentation_confidence"],
             }
             for shot, analysis in zip(payload.shots, analyses, strict=True)
@@ -144,12 +146,14 @@ class MeasurementAnalysisService:
             return aggregate
 
         confidence = sum(float(analysis["segmentation_confidence"]) for analysis in analyses) / len(analyses)
+        batch_foot_side = str(analyses[0].get("foot_side") or (payload.shots[0].foot_side if payload.shots else "RIGHT"))
         applied = await self.measurement_result_service.apply_result(
             user_id=user_id,
             session_id=session_id,
             payload=MeasurementResultApply(
                 foot_length_mm=float(aggregate["corrected_foot_length_mm"]),
                 foot_width_mm=float(aggregate["corrected_foot_width_mm"]),
+                foot_side=batch_foot_side,
                 segmentation_confidence=confidence,
             ),
         )

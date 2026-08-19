@@ -55,6 +55,7 @@ class ImageUploadForm(BaseModel):
 class MeasurementResultApply(BaseModel):
     foot_length_mm: float = Field(gt=0, le=400)
     foot_width_mm: float = Field(gt=0, le=200)
+    foot_side: str | None = Field(default="RIGHT")
     segmentation_confidence: float | None = Field(default=None, ge=0, le=1)
 
 
@@ -63,6 +64,7 @@ class MeasurementResultRead(BaseModel):
     session_id: str
     foot_length_mm: float
     foot_width_mm: float
+    foot_side: str | None = "RIGHT"
     segmentation_confidence: float | None = None
     status: str
     measured_at: datetime
@@ -71,12 +73,14 @@ class MeasurementResultRead(BaseModel):
 class MeasurementAnalysisRequest(BaseModel):
     point_x: int = Field(ge=0)
     point_y: int = Field(ge=0)
+    foot_side: str = Field(default="RIGHT")
 
 
 class MeasurementBatchShot(BaseModel):
     image_id: UUID
     point_x: int = Field(ge=0)
     point_y: int = Field(ge=0)
+    foot_side: str = Field(default="RIGHT")
 
 
 class MeasurementBatchAnalysisRequest(BaseModel):
