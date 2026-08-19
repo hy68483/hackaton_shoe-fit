@@ -165,6 +165,24 @@ class OpenCVServiceTests(unittest.TestCase):
         self.assertAlmostEqual(compensated["foot_length_mm"], 250.0, delta=2.0)
         self.assertAlmostEqual(compensated["foot_width_mm"], 90.0, delta=2.0)
 
+    def test_detects_markers_under_rotation(self) -> None:
+        for rot in (cv2.ROTATE_90_CLOCKWISE, cv2.ROTATE_180, cv2.ROTATE_90_COUNTERCLOCKWISE):
+            rotated = cv2.rotate(self.image, rot)
+            validation = self.service.validate_image(rotated)
+            self.assertTrue(validation["valid"])
+            centers = self.service.detect_marker_centers(rotated)
+            self.assertIsNotNone(centers)
+            self.assertEqual(len(centers), 4)
+
+    def test_detects_markers_under_extreme_brightness_and_contrast(self) -> None:
+        bright = cv2.convertScaleAbs(self.image, alpha=1.0, beta=60)
+        validation = self.service.validate_image(bright)
+        self.assertTrue(validation["valid"])
+
+        low_contrast = cv2.convertScaleAbs(self.image, alpha=0.5, beta=30)
+        validation_low = self.service.validate_image(low_contrast)
+        self.assertTrue(validation_low["valid"])
+
 
 if __name__ == "__main__":
     unittest.main()
