@@ -28,17 +28,16 @@ class MarkerLayout:
     horizontal_center_distance_mm: float = 175.0
     vertical_center_distance_mm: float = 262.0
 
-    def destination_centers(self, pixels_per_mm: float) -> np.ndarray:
+    def destination_centers(self, pixels_per_mm: float, is_landscape: bool = False) -> np.ndarray:
         """좌상, 우상, 우하, 좌하 순서의 균일한 축척 좌표를 반환한다."""
+        w = self.vertical_center_distance_mm if is_landscape else self.horizontal_center_distance_mm
+        h = self.horizontal_center_distance_mm if is_landscape else self.vertical_center_distance_mm
         return np.array(
             [
                 [0.0, 0.0],
-                [self.horizontal_center_distance_mm * pixels_per_mm, 0.0],
-                [
-                    self.horizontal_center_distance_mm * pixels_per_mm,
-                    self.vertical_center_distance_mm * pixels_per_mm,
-                ],
-                [0.0, self.vertical_center_distance_mm * pixels_per_mm],
+                [w * pixels_per_mm, 0.0],
+                [w * pixels_per_mm, h * pixels_per_mm],
+                [0.0, h * pixels_per_mm],
             ],
             dtype=np.float32,
         )
@@ -69,11 +68,10 @@ class CheckerboardLayout:
 class OpenCVService:
     """네 개의 25 mm 마커를 사용해 발 사진을 실측 좌표계로 변환한다."""
 
-    # 실제 모바일 촬영본의 검증 결과(18.7~22.0)를 반영한 하한이다.
-    # 이보다 낮으면 마커의 방향·외곽선도 안정적으로 식별하기 어렵다.
-    MIN_BLUR_VARIANCE = 15.0
-    MIN_BRIGHTNESS = 35.0
-    MAX_BRIGHTNESS = 250.0
+    # 다양한 모바일 촬영 환경(소프트 렌즈, 조명)을 반영한 임계값
+    MIN_BLUR_VARIANCE = 8.0
+    MIN_BRIGHTNESS = 30.0
+    MAX_BRIGHTNESS = 252.0
     PIXELS_PER_MM = 5.0
     ANKLE_CUTOFF_INSET_MM = 25.0
     MAX_POSE_REPROJECTION_ERROR_PX = 3.0
@@ -95,15 +93,69 @@ class OpenCVService:
 
     @staticmethod
     def _order_points(points: np.ndarray) -> np.ndarray:
-        """점 네 개를 좌상, 우상, 우하, 좌하 순서로 정렬한다."""
-        ordered = np.zeros((4, 2), dtype=np.float32)
-        sums = points.sum(axis=1)
-        differences = np.diff(points, axis=1).reshape(-1)
-        ordered[0] = points[np.argmin(sums)]
-        ordered[2] = points[np.argmax(sums)]
-        ordered[1] = points[np.argmin(differences)]
-        ordered[3] = points[np.argmax(differences)]
+        """점 네 개를 좌상(TL), 우상(TR), 우하(BR), 좌하(BL) 순서로 정렬한다."""
+        pts = np.asarray(points, dtype=np.float32).reshape(4, 2)
+        center = pts.mean(axis=0)
+        # 중심점 기준 각도 정렬
+        angles = np.arctan2(pts[:, 1] - center[1], pts[:, 0] - center[0])
+        sorted_indices = np.argsort(angles)
+        sorted_pts = pts[sorted_indices]
+
+        # 좌상단(x+y가 가장 작은 점)을 시작점으로 회전
+        sums = sorted_pts.sum(axis=1)
+        start_index = int(np.argmin(sums))
+        ordered = np.roll(sorted_pts, -start_index, axis=0)
+
+        # 시계방향 확인 (외적)
+        v1 = ordered[1] - ordered[0]
+        v2 = ordered[3] - ordered[0]
+        cross_prod = v1[0] * v2[1] - v1[1] * v2[0]
+        if cross_prod < 0:
+            ordered = ordered[[0, 3, 2, 1]]
+
         return ordered
+
+    @staticmethod
+    def _select_best_four_markers(candidates: list[np.ndarray]) -> list[np.ndarray] | None:
+        """후보 사각형들 중에서 4개의 마커가 가장 직사각형 배치를 이루는 4개를 선별한다."""
+        if len(candidates) < 4:
+            return None
+        if len(candidates) == 4:
+            return candidates
+
+        import itertools
+
+        best_score = float("inf")
+        best_combo = None
+
+        for combo in itertools.combinations(candidates, 4):
+            centers = np.array([pts.mean(axis=0) for pts in combo], dtype=np.float32)
+            hull = cv2.convexHull(centers.reshape(-1, 1, 2))
+            if len(hull) != 4:
+                continue
+
+            ordered = OpenCVService._order_points(centers)
+            top_len = float(np.linalg.norm(ordered[1] - ordered[0]))
+            bottom_len = float(np.linalg.norm(ordered[2] - ordered[3]))
+            left_len = float(np.linalg.norm(ordered[3] - ordered[0]))
+            right_len = float(np.linalg.norm(ordered[2] - ordered[1]))
+
+            if top_len <= 0 or bottom_len <= 0 or left_len <= 0 or right_len <= 0:
+                continue
+
+            horiz_diff = abs(top_len - bottom_len) / max(top_len, bottom_len)
+            vert_diff = abs(left_len - right_len) / max(left_len, right_len)
+
+            diag1 = float(np.linalg.norm(ordered[2] - ordered[0]))
+            diag2 = float(np.linalg.norm(ordered[3] - ordered[1]))
+            diag_diff = abs(diag1 - diag2) / max(diag1, diag2)
+
+            score = horiz_diff + vert_diff + diag_diff * 0.5
+            if score < best_score:
+                best_score = score
+                best_combo = list(combo)
+
+        return best_combo
 
     def _marker_quadrilaterals(self, image: np.ndarray) -> list[np.ndarray]:
         """가려지지 않은 네 개의 정사각형 마커 외곽을 반환한다."""
@@ -111,54 +163,141 @@ class OpenCVService:
             return []
 
         gray = self._gray(image)
-        # 조명에 따라 완전한 검정이 아니어도 검출할 수 있도록 어두운 영역을 이진화한다.
-        # 낮은 임계값으로 피부·그림자와 검은 마커를 분리한다.
-        _, binary = cv2.threshold(gray, 85, 255, cv2.THRESH_BINARY_INV)
-        binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
-        contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         image_area = float(image.shape[0] * image.shape[1])
-        candidates: list[tuple[float, np.ndarray]] = []
+        h, w = gray.shape[:2]
+        all_candidates: list[np.ndarray] = []
 
-        for contour in contours:
-            area = float(cv2.contourArea(contour))
-            if area < image_area * 0.00015 or area > image_area * 0.08:
-                continue
-            x, y, width, height = cv2.boundingRect(contour)
-            aspect_ratio = width / max(height, 1)
-            if not 0.72 <= aspect_ratio <= 1.28:
-                continue
-            rectangularity = area / max(float(width * height), 1.0)
-            if rectangularity < 0.65:
-                continue
-            approx = cv2.approxPolyDP(contour, 0.04 * cv2.arcLength(contour, True), True)
-            if len(approx) != 4 or not cv2.isContourConvex(approx):
-                continue
-            candidates.append((area, self._order_points(approx.reshape(4, 2).astype(np.float32))))
+        binaries: list[np.ndarray] = []
 
-        if len(candidates) < 4:
+        for thresh_val in [85, 45, 75, 105, 135, 165]:
+            _, bin_fixed = cv2.threshold(gray, thresh_val, 255, cv2.THRESH_BINARY_INV)
+            binaries.append(bin_fixed)
+
+        _, bin_otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        binaries.append(bin_otsu)
+
+        for block_size in [21, 51, 81]:
+            if block_size < min(h, w):
+                bin_adapt = cv2.adaptiveThreshold(
+                    gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, block_size, 7
+                )
+                binaries.append(bin_adapt)
+
+        kernel = np.ones((5, 5), np.uint8)
+
+        for binary in binaries:
+            closed = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+            contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            for contour in contours:
+                area = float(cv2.contourArea(contour))
+                if area < image_area * 0.00008 or area > image_area * 0.12:
+                    continue
+                bx, by, bw, bh = cv2.boundingRect(contour)
+                aspect_ratio = bw / max(bh, 1)
+                if not 0.45 <= aspect_ratio <= 2.2:
+                    continue
+                rectangularity = area / max(float(bw * bh), 1.0)
+                if rectangularity < 0.48:
+                    continue
+                perimeter = cv2.arcLength(contour, True)
+                for eps in [0.04, 0.03, 0.05, 0.02]:
+                    approx = cv2.approxPolyDP(contour, eps * perimeter, True)
+                    if len(approx) == 4 and cv2.isContourConvex(approx):
+                        ordered_pts = self._order_points(approx.reshape(4, 2).astype(np.float32))
+                        center = ordered_pts.mean(axis=0)
+                        is_duplicate = any(
+                            np.linalg.norm(existing.mean(axis=0) - center) < max(bw, bh) * 0.4
+                            for existing in all_candidates
+                        )
+                        if not is_duplicate:
+                            all_candidates.append(ordered_pts)
+                        break
+
+            if len(all_candidates) == 4:
+                return all_candidates
+
+        if len(all_candidates) < 4:
             return []
 
-        return [points for _, points in sorted(candidates, reverse=True, key=lambda item: item[0])[:4]]
+        best_four = self._select_best_four_markers(all_candidates)
+        if best_four is not None:
+            return best_four
+
+        return sorted(all_candidates, reverse=True, key=lambda pts: cv2.contourArea(pts.astype(np.float32)))[:4]
 
     @staticmethod
     def _detect_apriltag_markers(image: np.ndarray) -> list[tuple[int, np.ndarray]]:
-        """AprilTag-36h11 ID와 네 모서리를 검출한다."""
+        """AprilTag 및 ArUco ID와 네 모서리를 검출한다."""
         aruco = getattr(cv2, "aruco", None)
-        if aruco is None:
+        if aruco is None or image is None or image.size == 0:
             return []
-        dictionary = aruco.getPredefinedDictionary(aruco.DICT_APRILTAG_36h11)
-        detector = getattr(aruco, "ArucoDetector", None)
+
         gray = image if image.ndim == 2 else cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        if detector is not None:
-            corners, ids, _ = detector(dictionary).detectMarkers(gray)
-        else:
-            corners, ids, _ = aruco.detectMarkers(gray, dictionary)
-        if ids is None:
-            return []
-        return [
-            (int(marker_id), corners[index].reshape(4, 2).astype(np.float32))
-            for index, marker_id in enumerate(ids.flatten())
+
+        dict_ids = [
+            aruco.DICT_APRILTAG_36h11,
+            getattr(aruco, "DICT_4X4_50", 0),
+            getattr(aruco, "DICT_4X4_100", 1),
+            getattr(aruco, "DICT_5X5_50", 4),
+            getattr(aruco, "DICT_6X6_50", 8),
+            getattr(aruco, "DICT_ARUCO_ORIGINAL", 16),
         ]
+
+        scales = [1.0]
+        max_dim = max(gray.shape)
+        if max_dim > 1600:
+            scales.append(1200.0 / max_dim)
+        elif max_dim < 800:
+            scales.append(2.0)
+
+        for dict_id in dict_ids:
+            try:
+                dictionary = aruco.getPredefinedDictionary(dict_id)
+            except Exception:
+                continue
+
+            for scale in scales:
+                target_gray = gray if scale == 1.0 else cv2.resize(gray, (0, 0), fx=scale, fy=scale)
+                params = getattr(aruco, "DetectorParameters", None)
+                detector_params = params() if params is not None else None
+                if detector_params is not None:
+                    detector_params.adaptiveThreshWinSizeMin = 3
+                    detector_params.adaptiveThreshWinSizeMax = 53
+                    detector_params.adaptiveThreshWinSizeStep = 4
+                    detector_params.minMarkerPerimeterRate = 0.01
+                    detector_params.maxMarkerPerimeterRate = 4.0
+                    detector_params.polygonalApproxAccuracyRate = 0.05
+                    refine_method = getattr(aruco, "CORNER_REFINE_SUBPIX", None)
+                    if refine_method is not None:
+                        detector_params.cornerRefinementMethod = refine_method
+
+                detector_cls = getattr(aruco, "ArucoDetector", None)
+                if detector_cls is not None:
+                    if detector_params is not None:
+                        detector = detector_cls(dictionary, detector_params)
+                    else:
+                        detector = detector_cls(dictionary)
+                    corners, ids, _ = detector.detectMarkers(target_gray)
+                else:
+                    if detector_params is not None:
+                        corners, ids, _ = aruco.detectMarkers(target_gray, dictionary, parameters=detector_params)
+                    else:
+                        corners, ids, _ = aruco.detectMarkers(target_gray, dictionary)
+
+                if ids is not None and len(ids) >= 4:
+                    result: list[tuple[int, np.ndarray]] = []
+                    for index, marker_id in enumerate(ids.flatten()):
+                        c = corners[index].reshape(4, 2).astype(np.float32)
+                        if scale != 1.0:
+                            c = c / scale
+                        result.append((int(marker_id), c))
+                    if len(result) == 4:
+                        return result
+                    elif len(result) > 4:
+                        best_4 = OpenCVService._select_best_four_markers([pts for _, pts in result])
+                        if best_4 is not None:
+                            return [(0, pts) for pts in best_4]
+        return []
 
     def _ordered_marker_quadrilaterals(self, image: np.ndarray) -> list[np.ndarray]:
         tag_markers = self._detect_apriltag_markers(image)
@@ -186,12 +325,7 @@ class OpenCVService:
         return self._order_points(centers)
 
     def _detect_checkerboard_corners(self, image: np.ndarray) -> tuple[np.ndarray, tuple[int, int]] | None:
-        """완전히 보이는 3 cm 체커보드의 내부 코너를 검출한다.
-
-        기본 측정지는 5x10 내부 코너이며, 세로/가로로 돌려 촬영한 경우도 허용한다.
-        발이 체커보드 중심을 가리면 표준 OpenCV 검출이 실패할 수 있으므로, 실제
-        측정지에서는 체커보드 코너 영역을 발 바깥 테두리에 배치해야 한다.
-        """
+        """완전히 보이는 3 cm 체커보드의 내부 코너를 검출한다."""
         if image is None or image.size == 0:
             return None
         gray = self._gray(image)
@@ -228,35 +362,63 @@ class OpenCVService:
 
     def _reference_plane(self, image: np.ndarray) -> dict[str, Any] | None:
         """AprilTag 또는 체커보드에서 원근 보정에 필요한 대응점을 만든다."""
-        marker_centers = self.detect_marker_centers(image)
-        if marker_centers is not None:
+        tag_markers = self._detect_apriltag_markers(image)
+        if len(tag_markers) == 4:
+            quadrilaterals = [points for _, points in tag_markers]
+            centers = np.array([points.mean(axis=0) for points in quadrilaterals], dtype=np.float32)
+            ordered_centers = self._order_points(centers)
+            w_px = float(np.linalg.norm(ordered_centers[1] - ordered_centers[0]))
+            h_px = float(np.linalg.norm(ordered_centers[3] - ordered_centers[0]))
+            is_landscape = w_px > h_px * 1.15
+            destination = self.marker_layout.destination_centers(self.PIXELS_PER_MM, is_landscape=is_landscape)
             return {
                 "kind": "APRILTAG",
-                "source": marker_centers,
-                "destination": self.marker_layout.destination_centers(self.PIXELS_PER_MM),
-                "marker_centers": marker_centers,
+                "source": ordered_centers,
+                "destination": destination,
+                "marker_centers": ordered_centers,
+                "is_landscape": is_landscape,
             }
 
         checkerboard = self._detect_checkerboard_corners(image)
-        if checkerboard is None:
-            return None
-        source, pattern_size = checkerboard
-        return {
-            "kind": "CHECKERBOARD",
-            "source": source,
-            "destination": self.checkerboard_layout.destination_corners(self.PIXELS_PER_MM, pattern_size),
-            "marker_centers": None,
-            "pattern_size": pattern_size,
-        }
+        if checkerboard is not None:
+            source, pattern_size = checkerboard
+            return {
+                "kind": "CHECKERBOARD",
+                "source": source,
+                "destination": self.checkerboard_layout.destination_corners(self.PIXELS_PER_MM, pattern_size),
+                "marker_centers": None,
+                "pattern_size": pattern_size,
+                "is_landscape": False,
+            }
+
+        quadrilaterals = self._marker_quadrilaterals(image)
+        if len(quadrilaterals) == 4:
+            centers = np.array([points.mean(axis=0) for points in quadrilaterals], dtype=np.float32)
+            ordered_centers = self._order_points(centers)
+            w_px = float(np.linalg.norm(ordered_centers[1] - ordered_centers[0]))
+            h_px = float(np.linalg.norm(ordered_centers[3] - ordered_centers[0]))
+            is_landscape = w_px > h_px * 1.15
+            destination = self.marker_layout.destination_centers(self.PIXELS_PER_MM, is_landscape=is_landscape)
+            return {
+                "kind": "APRILTAG",
+                "source": ordered_centers,
+                "destination": destination,
+                "marker_centers": ordered_centers,
+                "is_landscape": is_landscape,
+            }
+
+        return None
 
     def _marker_scale_is_consistent(self, image: np.ndarray) -> bool:
         """마커 한 변 25 mm와 중심거리 배치가 사진에서 함께 성립하는지 확인한다."""
+        reference = self._reference_plane(image)
+        if reference is None or reference["kind"] != "APRILTAG":
+            return False
         quadrilaterals = self._ordered_marker_quadrilaterals(image)
         if len(quadrilaterals) != 4:
             return False
-        centers = np.array([points.mean(axis=0) for points in quadrilaterals], dtype=np.float32)
-        ordered_centers = self._order_points(centers)
-        destination_centers = self.marker_layout.destination_centers(self.PIXELS_PER_MM)
+        ordered_centers = reference["source"]
+        destination_centers = reference["destination"]
         matrix = cv2.getPerspectiveTransform(ordered_centers, destination_centers)
         side_lengths: list[float] = []
         for quadrilateral in quadrilaterals:
@@ -266,7 +428,8 @@ class OpenCVService:
                 for index in range(4)
             )
         marker_side_mm = float(np.median(side_lengths) / self.PIXELS_PER_MM)
-        return abs(marker_side_mm - self.marker_layout.marker_size_mm) <= self.marker_layout.marker_size_mm * 0.12
+        # 프린터 인쇄 축소(92~95%) 및 원근 왜곡을 고려하여 허용 오차를 28%로 조정
+        return abs(marker_side_mm - self.marker_layout.marker_size_mm) <= self.marker_layout.marker_size_mm * 0.28
 
     def _checkerboard_scale_is_consistent(self, image: np.ndarray) -> bool:
         detected = self._detect_checkerboard_corners(image)
