@@ -2512,9 +2512,11 @@ function MeasurePage() {
               `${index + 1}차 ${measurement.foot_length_mm.toFixed(1)}/${measurement.foot_width_mm.toFixed(1)}mm`,
           )
           .join(", ");
-        setMeasurementError(
-          `촬영 간 편차가 커요. ${measuredValues}. 같은 위치와 각도로 다시 촬영해 주세요.`,
-        );
+        const errorPrefix =
+          result.data.correction_reason === "IMPLAUSIBLE_MEASUREMENT"
+            ? "측정값이 정상 발 범위를 벗어났어요. 발 전체와 측정용지 마커가 보이게 다시 촬영해 주세요."
+            : "촬영 간 편차가 커요. 같은 위치와 각도로 다시 촬영해 주세요.";
+        setMeasurementError(`${errorPrefix} 측정값: ${measuredValues}.`);
         setStep("qualityFail");
         return;
       }

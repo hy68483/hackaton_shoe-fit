@@ -22,6 +22,12 @@ class MeasurementService:
     # 3장 촬영 기준으로 이 범위를 넘으면, 평균값을 최종 길이로 확정하지 않는다.
     MAX_MULTI_CAPTURE_LENGTH_SPREAD_MM = 5.0
     MAX_MULTI_CAPTURE_WIDTH_SPREAD_MM = 3.0
+    MIN_PLAUSIBLE_FOOT_LENGTH_MM = 180.0
+    MAX_PLAUSIBLE_FOOT_LENGTH_MM = 330.0
+    MIN_PLAUSIBLE_FOOT_WIDTH_MM = 60.0
+    MAX_PLAUSIBLE_FOOT_WIDTH_MM = 140.0
+    MIN_PLAUSIBLE_WIDTH_RATIO = 0.25
+    MAX_PLAUSIBLE_WIDTH_RATIO = 0.55
 
     def __init__(self, sam_service: SAMService | None = None, opencv_service: OpenCVService | None = None) -> None:
         # 테스트에서는 가짜 서비스 주입이 가능하고, 기본 실행은 실제 서비스로 구성한다.
@@ -148,6 +154,30 @@ class MeasurementService:
         )
 
     @classmethod
+    def is_plausible_measurement(cls, length_mm: float, width_mm: float) -> bool:
+        """명백한 분할·원근 보정 실패값이 최종 결과로 저장되지 않게 한다."""
+        if not np.isfinite(length_mm) or not np.isfinite(width_mm):
+            return False
+        if not (
+            cls.MIN_PLAUSIBLE_FOOT_LENGTH_MM
+            <= length_mm
+            <= cls.MAX_PLAUSIBLE_FOOT_LENGTH_MM
+        ):
+            return False
+        if not (
+            cls.MIN_PLAUSIBLE_FOOT_WIDTH_MM
+            <= width_mm
+            <= cls.MAX_PLAUSIBLE_FOOT_WIDTH_MM
+        ):
+            return False
+        width_ratio = width_mm / length_mm
+        return (
+            cls.MIN_PLAUSIBLE_WIDTH_RATIO
+            <= width_ratio
+            <= cls.MAX_PLAUSIBLE_WIDTH_RATIO
+        )
+
+    @classmethod
     def aggregate_measurements(
         cls,
         measurements: Iterable[dict[str, float | bool | str]],
@@ -169,12 +199,33 @@ class MeasurementService:
         width_median = float(median(widths))
         length_spread = max(lengths) - min(lengths)
         width_spread = max(widths) - min(widths)
+        plausible_indices = [
+            index
+            for index, (length, width) in enumerate(zip(lengths, widths, strict=True))
+            if cls.is_plausible_measurement(length, width)
+        ]
+        implausible_indices = [
+            index for index in range(len(successful)) if index not in plausible_indices
+        ]
+        plausible_lengths = [lengths[index] for index in plausible_indices]
+        plausible_widths = [widths[index] for index in plausible_indices]
+        plausible_length_spread = (
+            max(plausible_lengths) - min(plausible_lengths)
+            if len(plausible_lengths) >= 2
+            else float("inf")
+        )
+        plausible_width_spread = (
+            max(plausible_widths) - min(plausible_widths)
+            if len(plausible_widths) >= 2
+            else float("inf")
+        )
         all_consistent = (
-            length_spread <= cls.MAX_MULTI_CAPTURE_LENGTH_SPREAD_MM
-            and width_spread <= cls.MAX_MULTI_CAPTURE_WIDTH_SPREAD_MM
+            len(plausible_indices) >= 2
+            and plausible_length_spread <= cls.MAX_MULTI_CAPTURE_LENGTH_SPREAD_MM
+            and plausible_width_spread <= cls.MAX_MULTI_CAPTURE_WIDTH_SPREAD_MM
         )
         agreeing_pairs: list[tuple[float, int, int]] = []
-        for first, second in combinations(range(len(successful)), 2):
+        for first, second in combinations(plausible_indices, 2):
             length_difference = abs(lengths[first] - lengths[second])
             width_difference = abs(widths[first] - widths[second])
             if (
@@ -188,9 +239,9 @@ class MeasurementService:
                 agreeing_pairs.append((normalized_difference, first, second))
 
         if all_consistent:
-            accepted_indices = list(range(len(successful)))
-            corrected_length = length_median
-            corrected_width = width_median
+            accepted_indices = plausible_indices
+            corrected_length = float(median(plausible_lengths))
+            corrected_width = float(median(plausible_widths))
         elif agreeing_pairs:
             _, first, second = min(agreeing_pairs)
             accepted_indices = [first, second]
@@ -239,14 +290,21 @@ class MeasurementService:
             "accepted_width_spread_mm": round(accepted_width_spread, 1),
             "accepted_measurement_indices": accepted_indices,
             "excluded_measurement_indices": excluded_indices,
+            "implausible_measurement_indices": implausible_indices,
             "aggregation_method": (
-                "MEDIAN" if all_consistent else "CLOSEST_PAIR_MEAN"
+                "MEDIAN"
+                if all_consistent
+                else "CLOSEST_PAIR_MEAN"
+                if accepted_indices
+                else "NONE"
             ),
             "outlier_rejected": outlier_rejected,
             "correction_applied": correction_applied,
             "retake_required": retake_required,
             "correction_reason": (
-                "NO_CONSENSUS"
+                "IMPLAUSIBLE_MEASUREMENT"
+                if retake_required and len(plausible_indices) < 2
+                else "NO_CONSENSUS"
                 if retake_required
                 else "OUTLIER_REJECTED"
                 if outlier_rejected
