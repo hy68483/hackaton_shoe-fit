@@ -34,11 +34,12 @@ import {
 } from "react-router-dom";
 import { deleteCurrentUser, getCurrentUser, login, signup } from "./api/auth";
 import {
-  analyzeMeasurementImage,
+  analyzeMeasurementBatch,
   createMeasurementConsent,
   createMeasurementSession,
   uploadMeasurementImage,
   validateMeasurementImage,
+  type MeasurementBatchShot,
   type MeasurementResultData,
 } from "./api/measurements";
 import { applyFootProfile } from "./api/profiles";
@@ -2398,6 +2399,7 @@ function MeasurePage() {
   const [consents, setConsents] = useState([false, false, false, false]);
   const [fitPreference, setFitPreference] = useState("normal");
   const [measurementSessionId, setMeasurementSessionId] = useState("");
+  const [measurementShots, setMeasurementShots] = useState<MeasurementBatchShot[]>([]);
   const [measurementError, setMeasurementError] = useState("");
   const [processingMessage, setProcessingMessage] = useState(
     "잠시만 기다려 주세요",
@@ -2415,6 +2417,7 @@ function MeasurePage() {
 
   const allConsentChecked = consents.every(Boolean);
   const allPaperChecked = paperChecks.every(Boolean);
+  const isVariationRetake = measurementError.startsWith("촬영 간 편차");
 
   async function startMeasurementSession() {
     const accessToken = localStorage.getItem(AUTH_ACCESS_TOKEN_KEY);
@@ -2433,6 +2436,7 @@ function MeasurePage() {
         consent.data.id,
       );
       setMeasurementSessionId(session.data.session_id);
+      setMeasurementShots([]);
       setStep("guide");
     } catch (error) {
       setMeasurementError(
@@ -2463,7 +2467,7 @@ function MeasurePage() {
       setStep("processing");
       const dimensions = await getImageDimensions(file);
 
-      await uploadMeasurementImage({
+      const uploaded = await uploadMeasurementImage({
         accessToken,
         sessionId: measurementSessionId,
         image: file,
@@ -2476,15 +2480,38 @@ function MeasurePage() {
       setProcessingMessage("측정용지와 발 상태를 검증하고 있어요");
       await validateMeasurementImage(accessToken, measurementSessionId);
 
-      setProcessingMessage("SAM/OpenCV로 발 사이즈를 분석하고 있어요");
-      const result = await analyzeMeasurementImage({
-        accessToken,
-        sessionId: measurementSessionId,
+      const shot: MeasurementBatchShot = {
+        imageId: uploaded.data.image_id,
         pointX: Math.round(dimensions.width / 2),
         pointY: Math.round(dimensions.height / 2),
+        footSide: "RIGHT",
+      };
+      const nextShots = [...measurementShots, shot];
+      setMeasurementShots(nextShots);
+
+      if (nextShots.length < 3) {
+        setProcessingMessage(`${nextShots.length}장 검증 완료`);
+        setStep("camera");
+        return;
+      }
+
+      setProcessingMessage("3장의 측정값을 비교하고 있어요");
+      const result = await analyzeMeasurementBatch({
+        accessToken,
+        sessionId: measurementSessionId,
+        shots: nextShots,
       });
 
-      const profile = createFootProfileFromMeasurement(result.data);
+      if (result.data.retake_required || !result.data.result) {
+        setMeasurementShots([]);
+        setMeasurementError(
+          `촬영 간 편차가 커요. 길이 ${result.data.length_spread_mm}mm, 발볼 ${result.data.width_spread_mm}mm 차이가 났어요.`,
+        );
+        setStep("qualityFail");
+        return;
+      }
+
+      const profile = createFootProfileFromMeasurement(result.data.result);
       saveFootProfile(profile);
       setFootProfile(profile);
       setMeasurementSavedByBackend(true);
@@ -2590,20 +2617,35 @@ function MeasurePage() {
             <ScanLine size={26} />
           </div>
           <h1 className="mt-7 text-center text-[18px] font-black">
-            측정용지를 인식하지 못했어요
-            <br />
-            다시 촬영할게요
+            {isVariationRetake ? (
+              <>
+                측정값 차이가 커요
+                <br />
+                세 장을 다시 촬영해 주세요
+              </>
+            ) : (
+              <>
+                측정용지를 인식하지 못했어요
+                <br />
+                다시 촬영할게요
+              </>
+            )}
           </h1>
           <p className="mt-3 text-center text-[11px] font-semibold text-[#8a8695]">
             {measurementError || "네 개의 마커가 모두 보이도록 다시 촬영해 주세요."}
           </p>
           <div className="mt-8 space-y-3">
-            <QualityMessage success>
-              사진 밝기와 흔들림은 괜찮아요
-            </QualityMessage>
-            <QualityMessage>
-              측정용지의 네 개 마커가 모두 보여야 해요
-            </QualityMessage>
+            {isVariationRetake ? (
+              <>
+                <QualityMessage success>세 장 모두 분석은 완료됐어요</QualityMessage>
+                <QualityMessage>같은 자세와 거리에서 다시 촬영해 주세요</QualityMessage>
+              </>
+            ) : (
+              <>
+                <QualityMessage success>사진 밝기와 흔들림은 괜찮아요</QualityMessage>
+                <QualityMessage>측정용지의 네 개 마커가 모두 보여야 해요</QualityMessage>
+              </>
+            )}
           </div>
         </div>
         <MeasureBottomButton onClick={() => setStep("camera")}>
@@ -2883,7 +2925,9 @@ function MeasurePage() {
           >
             <ChevronLeft size={25} />
           </button>
-          <p className="mx-auto pr-6 text-[12px] font-bold">발 사진 촬영</p>
+          <p className="mx-auto pr-6 text-[12px] font-bold">
+            발 사진 촬영 {measurementShots.length + 1}/3
+          </p>
           <HomeTopButton
             light
             className="absolute right-5 top-[14px] flex h-9 w-9 items-center justify-end"
@@ -2902,7 +2946,9 @@ function MeasurePage() {
           </div>
         </div>
         <p className="mt-5 px-8 text-center text-[11px] font-semibold leading-5 text-white/70">
-          실제 측정용지의 네 개 마커가 화면 가이드 안에 모두 보이게 맞춰주세요.
+          {measurementShots.length > 0
+            ? `${measurementShots.length}장 완료했어요. 같은 발을 조금 다른 위치에서 다시 촬영해 주세요.`
+            : "실제 측정용지의 네 개 마커가 화면 가이드 안에 모두 보이게 맞춰주세요."}
         </p>
         <input
           ref={imageInputRef}

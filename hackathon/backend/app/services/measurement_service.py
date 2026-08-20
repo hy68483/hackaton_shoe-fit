@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from statistics import median
 from typing import Iterable
 
+import cv2
 import numpy as np
 
 from app.core.config import settings
@@ -29,7 +32,15 @@ class MeasurementService:
         )
         self.opencv_service = opencv_service or OpenCVService(camera_calibration=calibration)
 
-    def analyze_foot(self, image: np.ndarray, point_x: int, point_y: int) -> dict[str, float | bool | str]:
+    def analyze_foot(
+        self,
+        image: np.ndarray,
+        point_x: int,
+        point_y: int,
+        *,
+        diagnostic_dir: Path | None = None,
+        diagnostic_stem: str = "measurement",
+    ) -> dict[str, float | bool | str]:
         """한쪽 발의 mm 치수 또는 문서화된 실패 코드를 반환한다."""
         # 유효하지 않은 사진은 SAM 추론과 치수 계산을 수행하지 않는다.
         validation = self.opencv_service.validate_image(image)
@@ -60,6 +71,19 @@ class MeasurementService:
                     dimensions["parallax_correction_reason"] = "BACKPROJECTION_FAILED"
             elif self.opencv_service.camera_calibration is not None:
                 dimensions["parallax_correction_reason"] = "POSE_UNAVAILABLE"
+
+            if diagnostic_dir is not None:
+                self._save_diagnostics(
+                    diagnostic_dir=diagnostic_dir,
+                    diagnostic_stem=diagnostic_stem,
+                    image=image,
+                    point_x=point_x,
+                    point_y=point_y,
+                    mask=segmentation["mask"],
+                    corrected_mask=corrected["mask"],
+                    dimensions=dimensions,
+                    confidence=float(segmentation["segmentation_confidence"]),
+                )
         except SegmentationError:
             # checkpoint·추론·mask 오류를 하나의 공개 실패 코드로 정규화한다.
             return {"success": False, "reason": "SEGMENTATION_FAILED"}
@@ -79,6 +103,48 @@ class MeasurementService:
             "foot_side": foot_side,
             "segmentation_confidence": float(segmentation["segmentation_confidence"]),
         }
+
+    @staticmethod
+    def _save_diagnostics(
+        *,
+        diagnostic_dir: Path,
+        diagnostic_stem: str,
+        image: np.ndarray,
+        point_x: int,
+        point_y: int,
+        mask: np.ndarray,
+        corrected_mask: np.ndarray,
+        dimensions: dict[str, float | bool | str],
+        confidence: float,
+    ) -> None:
+        diagnostic_dir.mkdir(parents=True, exist_ok=True)
+        binary_mask = (mask > 0).astype(np.uint8) * 255
+        corrected_binary_mask = (corrected_mask > 0).astype(np.uint8) * 255
+
+        overlay = image.copy()
+        selected = binary_mask > 0
+        overlay[selected] = (
+            overlay[selected].astype(np.float32) * 0.45
+            + np.array([40, 220, 40], dtype=np.float32) * 0.55
+        ).astype(np.uint8)
+        cv2.circle(overlay, (point_x, point_y), 12, (0, 0, 255), 3)
+
+        cv2.imwrite(str(diagnostic_dir / f"{diagnostic_stem}-mask.png"), binary_mask)
+        cv2.imwrite(
+            str(diagnostic_dir / f"{diagnostic_stem}-corrected-mask.png"),
+            corrected_binary_mask,
+        )
+        cv2.imwrite(str(diagnostic_dir / f"{diagnostic_stem}-overlay.jpg"), overlay)
+        metadata = {
+            "point_x": point_x,
+            "point_y": point_y,
+            "segmentation_confidence": confidence,
+            **dimensions,
+        }
+        (diagnostic_dir / f"{diagnostic_stem}-measurement.json").write_text(
+            json.dumps(metadata, ensure_ascii=True, indent=2),
+            encoding="utf-8",
+        )
 
     @classmethod
     def aggregate_measurements(
@@ -111,8 +177,13 @@ class MeasurementService:
         length_correction_required = length_spread > cls.MAX_MULTI_CAPTURE_LENGTH_SPREAD_MM
         width_correction_required = width_spread > cls.MAX_MULTI_CAPTURE_WIDTH_SPREAD_MM
 
-        corrected_length = length_median if length_correction_required else length_average
-        corrected_width = width_median if width_correction_required else width_average
+        corrected_length = length_median
+        corrected_width = width_median
+        retake_required = length_correction_required or width_correction_required
+        correction_applied = (
+            abs(corrected_length - length_average) >= 0.05
+            or abs(corrected_width - width_average) >= 0.05
+        )
 
         return {
             "measurement_count": len(successful),
@@ -124,8 +195,9 @@ class MeasurementService:
             "width_correction_mm": round(corrected_width - width_average, 1),
             "length_spread_mm": round(length_spread, 1),
             "width_spread_mm": round(width_spread, 1),
-            "correction_applied": length_correction_required or width_correction_required,
-            "retake_required": length_correction_required,
+            "aggregation_method": "MEDIAN",
+            "correction_applied": correction_applied,
+            "retake_required": retake_required,
             "correction_reason": (
                 "LENGTH_SPREAD_EXCEEDED"
                 if length_correction_required
