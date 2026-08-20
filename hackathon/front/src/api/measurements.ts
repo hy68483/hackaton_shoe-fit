@@ -66,9 +66,23 @@ export type MeasurementBatchData = {
   corrected_foot_width_mm: number
   length_spread_mm: number
   width_spread_mm: number
+  accepted_length_spread_mm: number
+  accepted_width_spread_mm: number
+  accepted_measurement_indices: number[]
+  excluded_measurement_indices: number[]
+  aggregation_method: string
+  outlier_rejected: boolean
   correction_applied: boolean
   retake_required: boolean
   correction_reason: string
+  individual_measurements: Array<{
+    image_id: string
+    foot_length_mm: number
+    foot_width_mm: number
+    foot_side: string
+    segmentation_confidence: number
+    accepted: boolean
+  }>
   result?: MeasurementResultData
 }
 

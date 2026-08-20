@@ -2401,6 +2401,7 @@ function MeasurePage() {
   const [measurementSessionId, setMeasurementSessionId] = useState("");
   const [measurementShots, setMeasurementShots] = useState<MeasurementBatchShot[]>([]);
   const [measurementError, setMeasurementError] = useState("");
+  const [measurementNotice, setMeasurementNotice] = useState("");
   const [processingMessage, setProcessingMessage] = useState(
     "잠시만 기다려 주세요",
   );
@@ -2429,6 +2430,7 @@ function MeasurePage() {
 
     try {
       setMeasurementError("");
+      setMeasurementNotice("");
       setProcessingMessage("측정 세션을 준비하고 있어요");
       const consent = await createMeasurementConsent(accessToken);
       const session = await createMeasurementSession(
@@ -2504,11 +2506,44 @@ function MeasurePage() {
 
       if (result.data.retake_required || !result.data.result) {
         setMeasurementShots([]);
+        const measuredValues = result.data.individual_measurements
+          .map(
+            (measurement, index) =>
+              `${index + 1}차 ${measurement.foot_length_mm.toFixed(1)}/${measurement.foot_width_mm.toFixed(1)}mm`,
+          )
+          .join(", ");
         setMeasurementError(
-          `촬영 간 편차가 커요. 길이 ${result.data.length_spread_mm}mm, 발볼 ${result.data.width_spread_mm}mm 차이가 났어요.`,
+          `촬영 간 편차가 커요. ${measuredValues}. 같은 위치와 각도로 다시 촬영해 주세요.`,
         );
         setStep("qualityFail");
         return;
+      }
+
+      const measuredValues = result.data.individual_measurements
+        .map(
+          (measurement, index) =>
+            `${index + 1}차 ${measurement.foot_length_mm.toFixed(1)}/${measurement.foot_width_mm.toFixed(1)}mm`,
+        )
+        .join(", ");
+
+      if (result.data.outlier_rejected) {
+        const excludedShots = result.data.excluded_measurement_indices
+          .map((index) => `${index + 1}차`)
+          .join(", ");
+        const acceptedValues = result.data.individual_measurements
+          .filter((measurement) => measurement.accepted)
+          .map(
+            (measurement) =>
+              `${measurement.foot_length_mm.toFixed(1)}/${measurement.foot_width_mm.toFixed(1)}mm`,
+          )
+          .join(", ");
+        setMeasurementNotice(
+          `${excludedShots} 촬영값을 제외하고 서로 가까운 두 장(${acceptedValues})으로 계산했어요.`,
+        );
+      } else {
+        setMeasurementNotice(
+          `3장 측정값: ${measuredValues}. 중앙값으로 최종 결과를 계산했어요.`,
+        );
       }
 
       const profile = createFootProfileFromMeasurement(result.data.result);
@@ -3018,6 +3053,11 @@ function MeasurePage() {
           <p className="mt-3 text-[11px] font-semibold leading-5 text-[#8a8695]">
             착화감 선호도를 선택하면 더 정확한 사이즈를 추천해요.
           </p>
+          {measurementNotice && (
+            <p className="mt-5 rounded-[8px] bg-[#f0eefb] px-4 py-3 text-left text-[10px] font-semibold leading-4 text-[#5d57b7]">
+              {measurementNotice}
+            </p>
+          )}
           <div className="mt-8 rounded-[8px] bg-white p-4 shadow-sm">
             <p className="text-[11px] font-black">착화감 선호도 조정하기</p>
             <div className="mt-5 grid grid-cols-3 gap-2">

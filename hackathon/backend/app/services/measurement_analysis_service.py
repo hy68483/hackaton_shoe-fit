@@ -140,6 +140,7 @@ class MeasurementAnalysisService:
             analyses.append(analysis)
 
         aggregate = self.measurement_service.aggregate_measurements(analyses)
+        accepted_indices = set(aggregate["accepted_measurement_indices"])
         aggregate["individual_measurements"] = [
             {
                 "image_id": str(shot.image_id),
@@ -147,15 +148,27 @@ class MeasurementAnalysisService:
                 "foot_width_mm": analysis["foot_width_mm"],
                 "foot_side": analysis.get("foot_side", "RIGHT"),
                 "segmentation_confidence": analysis["segmentation_confidence"],
+                "accepted": index in accepted_indices,
             }
-            for shot, analysis in zip(payload.shots, analyses, strict=True)
+            for index, (shot, analysis) in enumerate(
+                zip(payload.shots, analyses, strict=True)
+            )
         ]
         if bool(aggregate["retake_required"]):
             await self.measurement_repository.update_status(measurement, "RETAKE_REQUIRED")
             return aggregate
 
-        confidence = sum(float(analysis["segmentation_confidence"]) for analysis in analyses) / len(analyses)
-        batch_foot_side = str(analyses[0].get("foot_side") or (payload.shots[0].foot_side if payload.shots else "RIGHT"))
+        accepted_analyses = [analyses[index] for index in sorted(accepted_indices)]
+        confidence = sum(
+            float(analysis["segmentation_confidence"])
+            for analysis in accepted_analyses
+        ) / len(accepted_analyses)
+        first_accepted_index = min(accepted_indices)
+        batch_foot_side = str(
+            analyses[first_accepted_index].get("foot_side")
+            or payload.shots[first_accepted_index].foot_side
+            or "RIGHT"
+        )
         applied = await self.measurement_result_service.apply_result(
             user_id=user_id,
             session_id=session_id,
