@@ -53,6 +53,25 @@ export type MeasurementResultData = {
   measured_at: string
 }
 
+export type MeasurementBatchShot = {
+  imageId: string
+  pointX: number
+  pointY: number
+  footSide?: string
+}
+
+export type MeasurementBatchData = {
+  measurement_count: number
+  corrected_foot_length_mm: number
+  corrected_foot_width_mm: number
+  length_spread_mm: number
+  width_spread_mm: number
+  correction_applied: boolean
+  retake_required: boolean
+  correction_reason: string
+  result?: MeasurementResultData
+}
+
 function authHeaders(accessToken: string) {
   return {
     Authorization: `Bearer ${accessToken}`,
@@ -157,6 +176,32 @@ export function analyzeMeasurementImage({
         point_x: pointX,
         point_y: pointY,
         foot_side: footSide,
+      }),
+    },
+  )
+}
+
+export function analyzeMeasurementBatch({
+  accessToken,
+  sessionId,
+  shots,
+}: {
+  accessToken: string
+  sessionId: string
+  shots: MeasurementBatchShot[]
+}) {
+  return apiRequest<ApiResponse<MeasurementBatchData>>(
+    `/measurements/sessions/${sessionId}/analyze-batch`,
+    {
+      method: 'POST',
+      token: accessToken,
+      body: JSON.stringify({
+        shots: shots.map((shot) => ({
+          image_id: shot.imageId,
+          point_x: shot.pointX,
+          point_y: shot.pointY,
+          foot_side: shot.footSide ?? 'RIGHT',
+        })),
       }),
     },
   )
