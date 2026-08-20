@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from itertools import combinations
 from pathlib import Path
 from statistics import median
 from typing import Iterable
@@ -150,14 +151,8 @@ class MeasurementService:
     def aggregate_measurements(
         cls,
         measurements: Iterable[dict[str, float | bool | str]],
-    ) -> dict[str, float | bool | int | str]:
-        """여러 장의 측정 결과를 집계하고, 편차가 크면 보정 정보를 반환한다.
-
-        촬영 각도나 SAM의 뒤꿈치 경계가 달라질 수 있으므로, 길이 편차가 임계치를
-        초과한 경우 산술 평균 대신 중앙값을 ``corrected_foot_length_mm``으로 제공한다.
-        이 값은 재촬영이 필요한 상태임을 함께 알려 주는 임시 대표값이며, 사용자에게
-        정확한 최종 측정값처럼 확정해서는 안 된다.
-        """
+    ) -> dict[str, object]:
+        """합의하는 측정값을 집계하고 단독 이상치는 최종 결과에서 제외한다."""
         successful = [result for result in measurements if result.get("success") is not False]
         if len(successful) < 2:
             raise ValueError("At least two successful measurements are required.")
@@ -174,15 +169,60 @@ class MeasurementService:
         width_median = float(median(widths))
         length_spread = max(lengths) - min(lengths)
         width_spread = max(widths) - min(widths)
-        length_correction_required = length_spread > cls.MAX_MULTI_CAPTURE_LENGTH_SPREAD_MM
-        width_correction_required = width_spread > cls.MAX_MULTI_CAPTURE_WIDTH_SPREAD_MM
+        all_consistent = (
+            length_spread <= cls.MAX_MULTI_CAPTURE_LENGTH_SPREAD_MM
+            and width_spread <= cls.MAX_MULTI_CAPTURE_WIDTH_SPREAD_MM
+        )
+        agreeing_pairs: list[tuple[float, int, int]] = []
+        for first, second in combinations(range(len(successful)), 2):
+            length_difference = abs(lengths[first] - lengths[second])
+            width_difference = abs(widths[first] - widths[second])
+            if (
+                length_difference <= cls.MAX_MULTI_CAPTURE_LENGTH_SPREAD_MM
+                and width_difference <= cls.MAX_MULTI_CAPTURE_WIDTH_SPREAD_MM
+            ):
+                normalized_difference = (
+                    length_difference / cls.MAX_MULTI_CAPTURE_LENGTH_SPREAD_MM
+                    + width_difference / cls.MAX_MULTI_CAPTURE_WIDTH_SPREAD_MM
+                )
+                agreeing_pairs.append((normalized_difference, first, second))
 
-        corrected_length = length_median
-        corrected_width = width_median
-        retake_required = length_correction_required or width_correction_required
+        if all_consistent:
+            accepted_indices = list(range(len(successful)))
+            corrected_length = length_median
+            corrected_width = width_median
+        elif agreeing_pairs:
+            _, first, second = min(agreeing_pairs)
+            accepted_indices = [first, second]
+            corrected_length = float(np.mean([lengths[first], lengths[second]]))
+            corrected_width = float(np.mean([widths[first], widths[second]]))
+        else:
+            accepted_indices = []
+            corrected_length = length_median
+            corrected_width = width_median
+
+        excluded_indices = [
+            index for index in range(len(successful)) if index not in accepted_indices
+        ]
+        retake_required = not accepted_indices
+        outlier_rejected = bool(excluded_indices) and not retake_required
         correction_applied = (
-            abs(corrected_length - length_average) >= 0.05
+            outlier_rejected
+            or retake_required
+            or abs(corrected_length - length_average) >= 0.05
             or abs(corrected_width - width_average) >= 0.05
+        )
+        accepted_length_spread = (
+            max(lengths[index] for index in accepted_indices)
+            - min(lengths[index] for index in accepted_indices)
+            if accepted_indices
+            else length_spread
+        )
+        accepted_width_spread = (
+            max(widths[index] for index in accepted_indices)
+            - min(widths[index] for index in accepted_indices)
+            if accepted_indices
+            else width_spread
         )
 
         return {
@@ -195,14 +235,21 @@ class MeasurementService:
             "width_correction_mm": round(corrected_width - width_average, 1),
             "length_spread_mm": round(length_spread, 1),
             "width_spread_mm": round(width_spread, 1),
-            "aggregation_method": "MEDIAN",
+            "accepted_length_spread_mm": round(accepted_length_spread, 1),
+            "accepted_width_spread_mm": round(accepted_width_spread, 1),
+            "accepted_measurement_indices": accepted_indices,
+            "excluded_measurement_indices": excluded_indices,
+            "aggregation_method": (
+                "MEDIAN" if all_consistent else "CLOSEST_PAIR_MEAN"
+            ),
+            "outlier_rejected": outlier_rejected,
             "correction_applied": correction_applied,
             "retake_required": retake_required,
             "correction_reason": (
-                "LENGTH_SPREAD_EXCEEDED"
-                if length_correction_required
-                else "WIDTH_SPREAD_EXCEEDED"
-                if width_correction_required
+                "NO_CONSENSUS"
+                if retake_required
+                else "OUTLIER_REJECTED"
+                if outlier_rejected
                 else "NONE"
             ),
         }
