@@ -70,6 +70,7 @@ export type MeasurementBatchData = {
   accepted_width_spread_mm: number
   accepted_measurement_indices: number[]
   excluded_measurement_indices: number[]
+  implausible_measurement_indices: number[]
   aggregation_method: string
   outlier_rejected: boolean
   correction_applied: boolean

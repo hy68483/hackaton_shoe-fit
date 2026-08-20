@@ -67,3 +67,31 @@ class MeasurementAggregationTests(TestCase):
         self.assertFalse(result["retake_required"])
         self.assertTrue(result["outlier_rejected"])
         self.assertEqual(result["excluded_measurement_indices"], [2])
+
+    def test_rejects_consistent_but_physically_impossible_measurements(self) -> None:
+        result = MeasurementService.aggregate_measurements(
+            [
+                {"foot_length_mm": 409.0, "foot_width_mm": 101.0},
+                {"foot_length_mm": 410.0, "foot_width_mm": 102.0},
+                {"foot_length_mm": 411.0, "foot_width_mm": 102.5},
+            ]
+        )
+
+        self.assertTrue(result["retake_required"])
+        self.assertEqual(result["accepted_measurement_indices"], [])
+        self.assertEqual(result["implausible_measurement_indices"], [0, 1, 2])
+        self.assertEqual(result["correction_reason"], "IMPLAUSIBLE_MEASUREMENT")
+
+    def test_excludes_an_impossible_value_before_pair_consensus(self) -> None:
+        result = MeasurementService.aggregate_measurements(
+            [
+                {"foot_length_mm": 252.0, "foot_width_mm": 101.0},
+                {"foot_length_mm": 254.0, "foot_width_mm": 102.0},
+                {"foot_length_mm": 410.0, "foot_width_mm": 102.0},
+            ]
+        )
+
+        self.assertFalse(result["retake_required"])
+        self.assertEqual(result["corrected_foot_length_mm"], 253.0)
+        self.assertEqual(result["accepted_measurement_indices"], [0, 1])
+        self.assertEqual(result["implausible_measurement_indices"], [2])

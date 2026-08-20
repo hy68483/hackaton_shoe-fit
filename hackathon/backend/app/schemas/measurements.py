@@ -53,8 +53,8 @@ class ImageUploadForm(BaseModel):
 
 
 class MeasurementResultApply(BaseModel):
-    foot_length_mm: float = Field(gt=0, le=400)
-    foot_width_mm: float = Field(gt=0, le=200)
+    foot_length_mm: float = Field(ge=180, le=330)
+    foot_width_mm: float = Field(ge=60, le=140)
     foot_side: str | None = Field(default="RIGHT")
     segmentation_confidence: float | None = Field(default=None, ge=0, le=1)
 
