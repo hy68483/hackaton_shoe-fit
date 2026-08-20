@@ -3208,9 +3208,7 @@ function MeasurePage() {
             <button
               type="button"
               onClick={() => {
-                setMeasurementShots([]);
                 setMeasurementError("");
-                setMeasurementNotice("");
                 setStep("start");
               }}
               className="mt-4 text-[12px] font-normal text-[#4640DE] underline"
