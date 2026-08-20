@@ -68,10 +68,10 @@ class CheckerboardLayout:
 class OpenCVService:
     """네 개의 25 mm 마커를 사용해 발 사진을 실측 좌표계로 변환한다."""
 
-    # 다양한 모바일 촬영 환경(소프트 렌즈, 조명)을 반영한 임계값
-    MIN_BLUR_VARIANCE = 8.0
-    MIN_BRIGHTNESS = 30.0
-    MAX_BRIGHTNESS = 252.0
+    # 다양한 모바일 촬영 환경(실내 조명, 그림자, 소프트 렌즈)을 반영한 유연한 임계값
+    MIN_BLUR_VARIANCE = 3.0
+    MIN_BRIGHTNESS = 20.0
+    MAX_BRIGHTNESS = 254.0
     PIXELS_PER_MM = 5.0
     ANKLE_CUTOFF_INSET_MM = 25.0
     MAX_POSE_REPROJECTION_ERROR_PX = 3.0
@@ -273,45 +273,45 @@ class OpenCVService:
             for g_src in [gray, gray_clahe]:
                 for scale in scales:
                     target_gray = g_src if scale == 1.0 else cv2.resize(g_src, (0, 0), fx=scale, fy=scale)
-                params = getattr(aruco, "DetectorParameters", None)
-                detector_params = params() if params is not None else None
-                if detector_params is not None:
-                    detector_params.adaptiveThreshWinSizeMin = 3
-                    detector_params.adaptiveThreshWinSizeMax = 53
-                    detector_params.adaptiveThreshWinSizeStep = 4
-                    detector_params.minMarkerPerimeterRate = 0.01
-                    detector_params.maxMarkerPerimeterRate = 4.0
-                    detector_params.polygonalApproxAccuracyRate = 0.05
-                    refine_method = getattr(aruco, "CORNER_REFINE_SUBPIX", None)
-                    if refine_method is not None:
-                        detector_params.cornerRefinementMethod = refine_method
-
-                detector_cls = getattr(aruco, "ArucoDetector", None)
-                if detector_cls is not None:
+                    params = getattr(aruco, "DetectorParameters", None)
+                    detector_params = params() if params is not None else None
                     if detector_params is not None:
-                        detector = detector_cls(dictionary, detector_params)
-                    else:
-                        detector = detector_cls(dictionary)
-                    corners, ids, _ = detector.detectMarkers(target_gray)
-                else:
-                    if detector_params is not None:
-                        corners, ids, _ = aruco.detectMarkers(target_gray, dictionary, parameters=detector_params)
-                    else:
-                        corners, ids, _ = aruco.detectMarkers(target_gray, dictionary)
+                        detector_params.adaptiveThreshWinSizeMin = 3
+                        detector_params.adaptiveThreshWinSizeMax = 53
+                        detector_params.adaptiveThreshWinSizeStep = 4
+                        detector_params.minMarkerPerimeterRate = 0.01
+                        detector_params.maxMarkerPerimeterRate = 4.0
+                        detector_params.polygonalApproxAccuracyRate = 0.05
+                        refine_method = getattr(aruco, "CORNER_REFINE_SUBPIX", None)
+                        if refine_method is not None:
+                            detector_params.cornerRefinementMethod = refine_method
 
-                if ids is not None and len(ids) >= 4:
-                    result: list[tuple[int, np.ndarray]] = []
-                    for index, marker_id in enumerate(ids.flatten()):
-                        c = corners[index].reshape(4, 2).astype(np.float32)
-                        if scale != 1.0:
-                            c = c / scale
-                        result.append((int(marker_id), c))
-                    if len(result) == 4:
-                        return result
-                    elif len(result) > 4:
-                        best_4 = OpenCVService._select_best_four_markers([pts for _, pts in result])
-                        if best_4 is not None:
-                            return [(0, pts) for pts in best_4]
+                    detector_cls = getattr(aruco, "ArucoDetector", None)
+                    if detector_cls is not None:
+                        if detector_params is not None:
+                            detector = detector_cls(dictionary, detector_params)
+                        else:
+                            detector = detector_cls(dictionary)
+                        corners, ids, _ = detector.detectMarkers(target_gray)
+                    else:
+                        if detector_params is not None:
+                            corners, ids, _ = aruco.detectMarkers(target_gray, dictionary, parameters=detector_params)
+                        else:
+                            corners, ids, _ = aruco.detectMarkers(target_gray, dictionary)
+
+                    if ids is not None and len(ids) >= 4:
+                        result: list[tuple[int, np.ndarray]] = []
+                        for index, marker_id in enumerate(ids.flatten()):
+                            c = corners[index].reshape(4, 2).astype(np.float32)
+                            if scale != 1.0:
+                                c = c / scale
+                            result.append((int(marker_id), c))
+                        if len(result) == 4:
+                            return result
+                        elif len(result) > 4:
+                            best_4 = OpenCVService._select_best_four_markers([pts for _, pts in result])
+                            if best_4 is not None:
+                                return [(0, pts) for pts in best_4]
         return []
 
     def _ordered_marker_quadrilaterals(self, image: np.ndarray) -> list[np.ndarray]:
@@ -443,8 +443,8 @@ class OpenCVService:
                 for index in range(4)
             )
         marker_side_mm = float(np.median(side_lengths) / self.PIXELS_PER_MM)
-        # 프린터 인쇄 축소(90~95%) 및 스마트폰 광각 렌즈/원근 왜곡을 고려하여 허용 오차를 45%로 유연화
-        return abs(marker_side_mm - self.marker_layout.marker_size_mm) <= self.marker_layout.marker_size_mm * 0.45
+        # 프린터 인쇄 축소(90~95%) 및 스마트폰 광각 렌즈/원근 왜곡을 고려하여 허용 오차를 50%로 유연화
+        return abs(marker_side_mm - self.marker_layout.marker_size_mm) <= self.marker_layout.marker_size_mm * 0.50
 
     def _checkerboard_scale_is_consistent(self, image: np.ndarray) -> bool:
         detected = self._detect_checkerboard_corners(image)
@@ -470,12 +470,18 @@ class OpenCVService:
             return {"valid": False, "reason": "IMAGE_INVALID", "checks": {}}
 
         gray = self._gray(image)
-        blur_ok = float(cv2.Laplacian(gray, cv2.CV_64F).var()) >= self.MIN_BLUR_VARIANCE
-        brightness = float(gray.mean())
-        brightness_ok = self.MIN_BRIGHTNESS <= brightness <= self.MAX_BRIGHTNESS
         reference = self._reference_plane(image)
         marker_ok = reference is not None
         marker_scale_ok = self._reference_scale_is_consistent(image, reference)
+
+        blur_val = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+        # 마커가 정상 검출된 경우 실내 촬영의 단색 배경 특성을 고려하여 2.0 이상이면 선명도로 인정
+        min_blur = 2.0 if marker_ok else self.MIN_BLUR_VARIANCE
+        blur_ok = blur_val >= min_blur
+
+        brightness = float(gray.mean())
+        brightness_ok = self.MIN_BRIGHTNESS <= brightness <= self.MAX_BRIGHTNESS
+
         checks = {
             "measurement_sheet": marker_ok,
             "foot_complete": True,
@@ -488,12 +494,12 @@ class OpenCVService:
             return {"valid": False, "reason": "IMAGE_TOO_DARK", "checks": checks}
         if brightness > self.MAX_BRIGHTNESS:
             return {"valid": False, "reason": "IMAGE_TOO_BRIGHT", "checks": checks}
-        if not blur_ok:
-            return {"valid": False, "reason": "IMAGE_BLUR", "checks": checks}
         if not marker_ok:
             return {"valid": False, "reason": "MARKER_NOT_FOUND", "checks": checks}
         if not marker_scale_ok:
             return {"valid": False, "reason": "MARKER_SCALE_MISMATCH", "checks": checks}
+        if not blur_ok:
+            return {"valid": False, "reason": "IMAGE_BLUR", "checks": checks}
         return {"valid": True, "checks": checks}
 
     def lower_leg_negative_point(self, image: np.ndarray) -> tuple[int, int] | None:
