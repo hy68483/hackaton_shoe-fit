@@ -165,5 +165,5 @@ class SAMService:
         return {
             "mask": mask,
             "bounding_box": {"x": int(x), "y": int(y), "width": int(box_width), "height": int(box_height)},
-            "segmentation_confidence": float(scores[index]),
+            "segmentation_confidence": float(np.clip(scores[index], 0.0, 1.0)),
         }
