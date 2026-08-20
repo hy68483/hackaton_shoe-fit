@@ -167,54 +167,66 @@ class OpenCVService:
         h, w = gray.shape[:2]
         all_candidates: list[np.ndarray] = []
 
+        # CLAHE 적용으로 그림자 및 불균일 조명 보정
+        clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
+        gray_clahe = clahe.apply(gray)
+
         binaries: list[np.ndarray] = []
 
-        for thresh_val in [85, 45, 75, 105, 135, 165]:
-            _, bin_fixed = cv2.threshold(gray, thresh_val, 255, cv2.THRESH_BINARY_INV)
-            binaries.append(bin_fixed)
+        for g in [gray, gray_clahe]:
+            for thresh_val in [40, 65, 85, 105, 135, 165]:
+                _, bin_fixed = cv2.threshold(g, thresh_val, 255, cv2.THRESH_BINARY_INV)
+                binaries.append(bin_fixed)
 
-        _, bin_otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-        binaries.append(bin_otsu)
+            _, bin_otsu = cv2.threshold(g, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+            binaries.append(bin_otsu)
 
-        for block_size in [21, 51, 81]:
-            if block_size < min(h, w):
-                bin_adapt = cv2.adaptiveThreshold(
-                    gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, block_size, 7
-                )
-                binaries.append(bin_adapt)
+            for block_size in [21, 45, 75, 105]:
+                if block_size < min(h, w):
+                    bin_adapt = cv2.adaptiveThreshold(
+                        g, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, block_size, 5
+                    )
+                    binaries.append(bin_adapt)
 
-        kernel = np.ones((5, 5), np.uint8)
+        kernel = np.ones((3, 3), np.uint8)
+
+        def add_candidate(pts_4: np.ndarray):
+            ordered_pts = self._order_points(pts_4)
+            center = ordered_pts.mean(axis=0)
+            for existing in all_candidates:
+                if np.linalg.norm(existing.mean(axis=0) - center) < 20.0:
+                    return
+            all_candidates.append(ordered_pts)
 
         for binary in binaries:
             closed = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
             contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             for contour in contours:
                 area = float(cv2.contourArea(contour))
-                if area < image_area * 0.00008 or area > image_area * 0.12:
+                if area < image_area * 0.00004 or area > image_area * 0.15:
                     continue
                 bx, by, bw, bh = cv2.boundingRect(contour)
                 aspect_ratio = bw / max(bh, 1)
-                if not 0.45 <= aspect_ratio <= 2.2:
+                if not 0.40 <= aspect_ratio <= 2.5:
                     continue
                 rectangularity = area / max(float(bw * bh), 1.0)
-                if rectangularity < 0.48:
+                if rectangularity < 0.40:
                     continue
+
                 perimeter = cv2.arcLength(contour, True)
-                for eps in [0.04, 0.03, 0.05, 0.02]:
+                poly_found = False
+                for eps in [0.03, 0.04, 0.05, 0.02, 0.06]:
                     approx = cv2.approxPolyDP(contour, eps * perimeter, True)
                     if len(approx) == 4 and cv2.isContourConvex(approx):
-                        ordered_pts = self._order_points(approx.reshape(4, 2).astype(np.float32))
-                        center = ordered_pts.mean(axis=0)
-                        is_duplicate = any(
-                            np.linalg.norm(existing.mean(axis=0) - center) < max(bw, bh) * 0.4
-                            for existing in all_candidates
-                        )
-                        if not is_duplicate:
-                            all_candidates.append(ordered_pts)
+                        add_candidate(approx.reshape(4, 2).astype(np.float32))
+                        poly_found = True
                         break
 
-            if len(all_candidates) == 4:
-                return all_candidates
+                # 모서리가 살짝 둥글거나 노이즈가 있는 경우 minAreaRect 활용
+                if not poly_found and rectangularity >= 0.65:
+                    rect = cv2.minAreaRect(contour)
+                    box = cv2.boxPoints(rect).astype(np.float32)
+                    add_candidate(box)
 
         if len(all_candidates) < 4:
             return []
@@ -233,6 +245,8 @@ class OpenCVService:
             return []
 
         gray = image if image.ndim == 2 else cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
+        gray_clahe = clahe.apply(gray)
 
         dict_ids = [
             aruco.DICT_APRILTAG_36h11,
@@ -256,33 +270,34 @@ class OpenCVService:
             except Exception:
                 continue
 
-            for scale in scales:
-                target_gray = gray if scale == 1.0 else cv2.resize(gray, (0, 0), fx=scale, fy=scale)
-                params = getattr(aruco, "DetectorParameters", None)
-                detector_params = params() if params is not None else None
-                if detector_params is not None:
-                    detector_params.adaptiveThreshWinSizeMin = 3
-                    detector_params.adaptiveThreshWinSizeMax = 53
-                    detector_params.adaptiveThreshWinSizeStep = 4
-                    detector_params.minMarkerPerimeterRate = 0.01
-                    detector_params.maxMarkerPerimeterRate = 4.0
-                    detector_params.polygonalApproxAccuracyRate = 0.05
-                    refine_method = getattr(aruco, "CORNER_REFINE_SUBPIX", None)
-                    if refine_method is not None:
-                        detector_params.cornerRefinementMethod = refine_method
+            for g_src in [gray, gray_clahe]:
+                for scale in scales:
+                    target_gray = g_src if scale == 1.0 else cv2.resize(g_src, (0, 0), fx=scale, fy=scale)
+                    params = getattr(aruco, "DetectorParameters", None)
+                    detector_params = params() if params is not None else None
+                    if detector_params is not None:
+                        detector_params.adaptiveThreshWinSizeMin = 3
+                        detector_params.adaptiveThreshWinSizeMax = 53
+                        detector_params.adaptiveThreshWinSizeStep = 4
+                        detector_params.minMarkerPerimeterRate = 0.01
+                        detector_params.maxMarkerPerimeterRate = 4.0
+                        detector_params.polygonalApproxAccuracyRate = 0.05
+                        refine_method = getattr(aruco, "CORNER_REFINE_SUBPIX", None)
+                        if refine_method is not None:
+                            detector_params.cornerRefinementMethod = refine_method
 
-                detector_cls = getattr(aruco, "ArucoDetector", None)
-                if detector_cls is not None:
-                    if detector_params is not None:
-                        detector = detector_cls(dictionary, detector_params)
+                    detector_cls = getattr(aruco, "ArucoDetector", None)
+                    if detector_cls is not None:
+                        if detector_params is not None:
+                            detector = detector_cls(dictionary, detector_params)
+                        else:
+                            detector = detector_cls(dictionary)
+                        corners, ids, _ = detector.detectMarkers(target_gray)
                     else:
-                        detector = detector_cls(dictionary)
-                    corners, ids, _ = detector.detectMarkers(target_gray)
-                else:
-                    if detector_params is not None:
-                        corners, ids, _ = aruco.detectMarkers(target_gray, dictionary, parameters=detector_params)
-                    else:
-                        corners, ids, _ = aruco.detectMarkers(target_gray, dictionary)
+                        if detector_params is not None:
+                            corners, ids, _ = aruco.detectMarkers(target_gray, dictionary, parameters=detector_params)
+                        else:
+                            corners, ids, _ = aruco.detectMarkers(target_gray, dictionary)
 
                     if ids is not None and len(ids) >= 4:
                         result: list[tuple[int, np.ndarray]] = []
