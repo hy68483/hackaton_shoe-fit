@@ -12,7 +12,11 @@ class Base(DeclarativeBase):
 
 
 engine = (
-    create_async_engine(settings.database_url, pool_pre_ping=True)
+    create_async_engine(
+        settings.database_url,
+        pool_pre_ping=True,
+        connect_args={"server_settings": {"client_encoding": "UTF8"}},
+    )
     if settings.database_url
     else None
 )

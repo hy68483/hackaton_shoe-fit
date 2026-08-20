@@ -32,7 +32,7 @@ import {
   useNavigate,
   useParams,
 } from "react-router-dom";
-import { getCurrentUser, login, signup } from "./api/auth";
+import { deleteCurrentUser, getCurrentUser, login, signup } from "./api/auth";
 import {
   analyzeMeasurementImage,
   createMeasurementConsent,
@@ -114,25 +114,10 @@ const SIGNUP_LOGIN_ID_KEY = "shoefit.signup.loginId";
 const AUTH_ACCESS_TOKEN_KEY = "shoefit.auth.accessToken";
 const AUTH_REFRESH_TOKEN_KEY = "shoefit.auth.refreshToken";
 const AUTH_LOGIN_ID_KEY = "shoefit.auth.loginId";
+const AUTH_USER_NAME_KEY = "shoefit.auth.userName";
 const CART_STORAGE_KEY = "shoefit.cart.items";
 const FOOT_PROFILE_STORAGE_KEY = "shoefit.footProfile";
-
-type BatteryManagerLike = EventTarget & {
-  level: number;
-  charging: boolean;
-  addEventListener: (
-    type: "levelchange" | "chargingchange",
-    listener: EventListenerOrEventListenerObject,
-  ) => void;
-  removeEventListener: (
-    type: "levelchange" | "chargingchange",
-    listener: EventListenerOrEventListenerObject,
-  ) => void;
-};
-
-type NavigatorWithBattery = Navigator & {
-  getBattery?: () => Promise<BatteryManagerLike>;
-};
+const WISHLIST_STORAGE_KEY = "shoefit.wishlist.productIds";
 
 type ShopProduct = {
   id: string;
@@ -544,6 +529,7 @@ function AppShell() {
   const location = useLocation();
   const hideBottomNav =
     location.pathname.startsWith("/measure") ||
+    /^\/products\/[^/]+$/.test(location.pathname) ||
     location.pathname === "/account/foot-profile" ||
     location.pathname === "/cart";
 
@@ -1283,6 +1269,7 @@ function SignupPasswordPage() {
       localStorage.setItem(AUTH_ACCESS_TOKEN_KEY, response.data.access_token);
       localStorage.setItem(AUTH_REFRESH_TOKEN_KEY, response.data.refresh_token);
       localStorage.setItem(AUTH_LOGIN_ID_KEY, normalizedLoginId);
+      localStorage.setItem(AUTH_USER_NAME_KEY, response.data.user.name);
       navigate("/signup/complete");
     } catch (error) {
       setSubmitError(
@@ -1408,9 +1395,14 @@ function LoginPage() {
         login_id: normalizeLoginId(loginId),
         password,
       });
+      const currentUserResponse = await getCurrentUser(response.data.access_token);
       localStorage.setItem(AUTH_ACCESS_TOKEN_KEY, response.data.access_token);
       localStorage.setItem(AUTH_REFRESH_TOKEN_KEY, response.data.refresh_token);
       localStorage.setItem(AUTH_LOGIN_ID_KEY, normalizeLoginId(loginId));
+      localStorage.setItem(
+        AUTH_USER_NAME_KEY,
+        currentUserResponse.data.user.name,
+      );
       navigate("/home");
     } catch (error) {
       setLoginError(
@@ -1571,83 +1563,13 @@ function AuthStatusBar() {
 }
 
 function MobileStatusBar({
-  light = false,
+  light: _light = false,
   className = "",
 }: {
   light?: boolean;
   className?: string;
 }) {
-  const [now, setNow] = useState(() => new Date());
-  const [batteryLevel, setBatteryLevel] = useState(1);
-  const [isCharging, setIsCharging] = useState(false);
-  const textColor = light ? "text-white" : "text-black";
-  const fillColor = light ? "bg-white" : "bg-black";
-  const borderColor = light ? "border-white/80" : "border-black/70";
-  const batteryWidth = Math.max(2, Math.round(batteryLevel * 12));
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(new Date()), 30_000);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
-    let battery: BatteryManagerLike | null = null;
-    let mounted = true;
-
-    const updateBattery = () => {
-      if (!battery || !mounted) {
-        return;
-      }
-      setBatteryLevel(battery.level);
-      setIsCharging(battery.charging);
-    };
-
-    void (navigator as NavigatorWithBattery).getBattery?.().then((manager) => {
-      if (!mounted) {
-        return;
-      }
-      battery = manager;
-      updateBattery();
-      battery.addEventListener("levelchange", updateBattery);
-      battery.addEventListener("chargingchange", updateBattery);
-    });
-
-    return () => {
-      mounted = false;
-      battery?.removeEventListener("levelchange", updateBattery);
-      battery?.removeEventListener("chargingchange", updateBattery);
-    };
-  }, []);
-
-  return (
-    <div
-      className={`relative flex h-11 items-center justify-between px-9 pt-2 text-[12px] font-bold ${textColor} ${className}`}
-    >
-      <span>
-        {now.toLocaleTimeString("ko-KR", {
-          hour: "numeric",
-          minute: "2-digit",
-          hour12: false,
-        })}
-      </span>
-      <div className="absolute left-1/2 top-[8px] h-[19px] w-[72px] -translate-x-1/2 rounded-full bg-black" />
-      <div className="flex items-center gap-1.5" aria-hidden="true">
-        <span className="flex h-3 items-end gap-0.5">
-          <span className={`block h-1.5 w-0.5 rounded-sm ${fillColor}`} />
-          <span className={`block h-2 w-0.5 rounded-sm ${fillColor}`} />
-          <span className={`block h-2.5 w-0.5 rounded-sm ${fillColor}`} />
-        </span>
-        <span className="text-[10px] leading-none">⌁</span>
-        <span className={`h-2.5 w-5 rounded-[3px] border p-[1px] ${borderColor}`}>
-          <span
-            className={`block h-full rounded-[1px] ${fillColor}`}
-            style={{ width: `${batteryWidth}px` }}
-          />
-        </span>
-        {isCharging && <span className="text-[9px] leading-none">⚡</span>}
-      </div>
-    </div>
-  );
+  return <div className={`h-11 shrink-0 bg-[#FBFAFF] ${className}`} />;
 }
 
 function onlyDigits(value: string, maxLength: number) {
@@ -1670,6 +1592,11 @@ function getSignupLoginId(value: string) {
 }
 
 function getDisplayUserName() {
+  const storedName = localStorage.getItem(AUTH_USER_NAME_KEY)?.trim();
+  if (storedName && !storedName.includes("�")) {
+    return storedName;
+  }
+
   const storedLoginId =
     localStorage.getItem(AUTH_LOGIN_ID_KEY) ??
     localStorage.getItem(SIGNUP_LOGIN_ID_KEY);
@@ -1802,6 +1729,22 @@ function loadFootProfile() {
 
 function saveFootProfile(profile: FootProfile) {
   localStorage.setItem(FOOT_PROFILE_STORAGE_KEY, JSON.stringify(profile));
+}
+
+function hasFootProfile() {
+  return loadFootProfile() !== null;
+}
+
+function clearUserLocalData() {
+  localStorage.removeItem(AUTH_ACCESS_TOKEN_KEY);
+  localStorage.removeItem(AUTH_REFRESH_TOKEN_KEY);
+  localStorage.removeItem(AUTH_LOGIN_ID_KEY);
+  localStorage.removeItem(AUTH_USER_NAME_KEY);
+  localStorage.removeItem(SIGNUP_NAME_KEY);
+  localStorage.removeItem(SIGNUP_LOGIN_ID_KEY);
+  localStorage.removeItem(CART_STORAGE_KEY);
+  localStorage.removeItem(FOOT_PROFILE_STORAGE_KEY);
+  localStorage.removeItem(WISHLIST_STORAGE_KEY);
 }
 
 function getFootWidthMm(profile: FootProfile) {
@@ -1965,6 +1908,53 @@ function addProductToCart(productId: string, size: string) {
   saveCartItems(nextItems);
 }
 
+function loadWishlistIds() {
+  const rawItems = localStorage.getItem(WISHLIST_STORAGE_KEY);
+
+  if (!rawItems) {
+    return [] as string[];
+  }
+
+  try {
+    const parsed = JSON.parse(rawItems) as string[];
+    return parsed.filter((productId) => getProductById(productId));
+  } catch {
+    return [];
+  }
+}
+
+function saveWishlistIds(productIds: string[]) {
+  localStorage.setItem(WISHLIST_STORAGE_KEY, JSON.stringify(productIds));
+}
+
+function toggleProductWishlist(productId: string) {
+  const currentIds = loadWishlistIds();
+  const nextIds = currentIds.includes(productId)
+    ? currentIds.filter((item) => item !== productId)
+    : [...currentIds, productId];
+
+  saveWishlistIds(nextIds);
+  return nextIds;
+}
+
+function getWishlistProducts() {
+  return loadWishlistIds()
+    .map((productId) => getProductById(productId))
+    .filter((product): product is ShopProduct => Boolean(product));
+}
+
+function isWishlistProduct(productId: string) {
+  return loadWishlistIds().includes(productId);
+}
+
+function getProductBadgeLabel(product: ShopProduct) {
+  if (!product.badge || !hasFootProfile()) {
+    return "";
+  }
+
+  return "✨ Fit for You";
+}
+
 function HomePage() {
   return (
     <section className="bg-[#FBFAFF] px-4 pb-[104px] pt-[15px]">
@@ -2038,6 +2028,8 @@ function HomePage() {
 }
 
 function HomeHeader() {
+  const navigate = useNavigate();
+
   return (
     <header className="flex h-[61px] items-center gap-3">
       <Link
@@ -2046,15 +2038,17 @@ function HomeHeader() {
       >
         shoe-fit
       </Link>
-      <Link
-        to="/search"
-        className="flex h-[46px] min-w-0 flex-1 items-center gap-2 rounded-full bg-[#f0eefb] px-4"
+      <button
+        type="button"
+        onClick={() => navigate("/search")}
+        className="flex h-[46px] min-w-0 flex-1 items-center gap-2 rounded-full bg-[#f0eefb] px-4 text-left"
+        aria-label="상품 검색"
       >
         <Search size={20} className="shrink-0 text-[#9d98d9]" />
         <span className="min-w-0 flex-1 text-[15px] font-semibold text-[#aaa6c7]">
           브랜드, 상품명 검색
         </span>
-      </Link>
+      </button>
       <Link
         to="/cart"
         className="flex h-[46px] w-[46px] shrink-0 items-center justify-center rounded-full bg-[#c9c0f8] text-white"
@@ -2220,6 +2214,11 @@ function ProductCard({
   product: ShopProduct;
   compact?: boolean;
 }) {
+  const [wishlisted, setWishlisted] = useState(() =>
+    isWishlistProduct(product.id),
+  );
+  const badgeLabel = getProductBadgeLabel(product);
+
   return (
     <article className={compact ? "w-[113px] shrink-0" : "min-w-0"}>
       <Link
@@ -2228,9 +2227,9 @@ function ProductCard({
           compact ? "h-[126px]" : "h-[171px]"
         }`}
       >
-        {product.badge && (
+        {badgeLabel && (
           <span className="absolute left-2 top-2 rounded-full bg-[#6f66ff] px-2 py-1 text-[9px] font-semibold text-white">
-            {product.badge}
+            {badgeLabel}
           </span>
         )}
         <img
@@ -2239,10 +2238,25 @@ function ProductCard({
           className="max-h-full max-w-full object-contain"
         />
         <span
-          className="absolute bottom-2 right-2 flex h-6 w-6 items-center justify-center rounded-full bg-white text-[#777482] shadow-sm"
-          aria-hidden="true"
+          role="button"
+          tabIndex={0}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setWishlisted(toggleProductWishlist(product.id).includes(product.id));
+          }}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter" && event.key !== " ") return;
+            event.preventDefault();
+            event.stopPropagation();
+            setWishlisted(toggleProductWishlist(product.id).includes(product.id));
+          }}
+          className={`absolute bottom-2 right-2 flex h-6 w-6 items-center justify-center rounded-full bg-white shadow-sm ${
+            wishlisted ? "text-[#4640DE]" : "text-[#777482]"
+          }`}
+          aria-label="위시리스트 등록"
         >
-          <Heart size={13} strokeWidth={1.9} />
+          <Heart size={13} strokeWidth={1.9} fill={wishlisted ? "currentColor" : "none"} />
         </span>
       </Link>
       <p className="mt-2 text-[10px] font-normal text-[#888493]">
@@ -2270,15 +2284,17 @@ function ProductCard({
 }
 
 function MiniProductCard({ product }: { product: ShopProduct }) {
+  const badgeLabel = getProductBadgeLabel(product);
+
   return (
     <article className="min-w-0">
       <Link
         to={`/products/${product.id}`}
         className="relative flex aspect-square items-center justify-center rounded-[8px] bg-[#f3f2f8] p-2"
       >
-        {product.badge && (
+        {badgeLabel && (
           <span className="absolute left-1.5 top-1.5 rounded-full bg-[#6f66ff] px-1.5 py-0.5 text-[8px] font-black text-white">
-            {product.badge}
+            {badgeLabel}
           </span>
         )}
         <img
@@ -3375,14 +3391,31 @@ function AccountPage() {
     { title: "기타", items: ["동의 정보/철회 삭제", "로그아웃", "회원탈퇴"] },
   ];
 
-  function handleAccountMenu(item: string) {
-    if (item !== "로그아웃") {
+  async function handleAccountMenu(item: string) {
+    if (item === "로그아웃") {
+      clearUserLocalData();
+      navigate("/");
       return;
     }
 
-    localStorage.removeItem(AUTH_ACCESS_TOKEN_KEY);
-    localStorage.removeItem(AUTH_REFRESH_TOKEN_KEY);
-    localStorage.removeItem(AUTH_LOGIN_ID_KEY);
+    if (item !== "회원탈퇴") {
+      return;
+    }
+
+    const confirmed = window.confirm("회원탈퇴 후 계정 정보를 복구할 수 없습니다. 탈퇴할까요?");
+    if (!confirmed) {
+      return;
+    }
+
+    const accessToken = localStorage.getItem(AUTH_ACCESS_TOKEN_KEY);
+    if (accessToken) {
+      try {
+        await deleteCurrentUser(accessToken);
+      } catch {
+        // 이미 만료된 토큰이어도 로컬 세션은 정리해 앱에서 탈퇴 흐름을 완료한다.
+      }
+    }
+    clearUserLocalData();
     navigate("/");
   }
 
@@ -3642,6 +3675,12 @@ function FootProfilePage() {
 }
 
 function WishlistPage() {
+  const [products, setProducts] = useState(() => getWishlistProducts());
+
+  useEffect(() => {
+    setProducts(getWishlistProducts());
+  }, []);
+
   return (
     <section className="px-3 pb-5 pt-1">
       <TopBar title="Wishlist" />
@@ -3662,11 +3701,23 @@ function WishlistPage() {
         ))}
       </div>
 
-      <div className="mt-3 grid grid-cols-3 gap-x-2.5 gap-y-5">
-        {wishlistProducts.map((product) => (
-          <MiniProductCard key={product.id} product={product} />
-        ))}
-      </div>
+      {products.length > 0 ? (
+        <div className="mt-3 grid grid-cols-3 gap-x-2.5 gap-y-5">
+          {products.map((product) => (
+            <MiniProductCard key={product.id} product={product} />
+          ))}
+        </div>
+      ) : (
+        <div className="flex min-h-[440px] flex-col items-center justify-center px-8 text-center">
+          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[#f0eefb] text-[#8b84e6]">
+            <Heart size={28} />
+          </div>
+          <p className="mt-5 text-[16px] font-black">위시리스트가 비어 있어요</p>
+          <p className="mt-3 text-[11px] font-semibold leading-5 text-[#8a8695]">
+            상품의 하트 버튼을 눌러 마음에 드는 신발을 저장해 보세요.
+          </p>
+        </div>
+      )}
     </section>
   );
 }
@@ -4261,10 +4312,12 @@ function ProductDetailPage() {
   const navigate = useNavigate();
   const { productId } = useParams();
   const [selectedSize, setSelectedSize] = useState<string | null>(null);
+  const [wishlisted, setWishlisted] = useState(false);
   const baseProduct = shopProducts.find((item) => item.id === productId);
 
   useEffect(() => {
     setSelectedSize(null);
+    setWishlisted(productId ? isWishlistProduct(productId) : false);
   }, [productId]);
 
   if (!baseProduct) {
@@ -4311,7 +4364,7 @@ function ProductDetailPage() {
   }
 
   return (
-    <section className="px-3 pb-40 pt-1">
+    <section className="px-3 pb-28 pt-1">
       <div className="relative flex h-11 items-center justify-between">
         <Link
           to="/home"
@@ -4371,9 +4424,13 @@ function ProductDetailPage() {
           </div>
           <button
             type="button"
-            className="flex h-8 w-8 items-center justify-center text-[#777482]"
+            onClick={() => setWishlisted(toggleProductWishlist(product.id).includes(product.id))}
+            className={`flex h-8 w-8 items-center justify-center ${
+              wishlisted ? "text-[#4640DE]" : "text-[#777482]"
+            }`}
+            aria-label="위시리스트 등록"
           >
-            <Heart size={20} />
+            <Heart size={20} fill={wishlisted ? "currentColor" : "none"} />
           </button>
         </div>
         <p className="mt-3 text-right text-[17px] font-normal">
@@ -4401,7 +4458,7 @@ function ProductDetailPage() {
         </div>
       </section>
 
-      <div className="fixed inset-x-0 bottom-[84px] z-10 mx-auto flex max-w-[430px] gap-2 px-4">
+      <div className="fixed inset-x-0 bottom-0 z-30 mx-auto flex max-w-[430px] gap-2 bg-[#FBFAFF] px-4 pb-6 pt-3 shadow-[0_-10px_28px_rgba(70,64,222,0.08)]">
         <button
           type="button"
           onClick={handleAddToCart}

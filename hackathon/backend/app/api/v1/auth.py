@@ -84,6 +84,20 @@ async def me(
     }
 
 
+@router.delete("/me")
+async def delete_me(
+    token: Annotated[str, Depends(get_bearer_token)],
+    auth_service: Annotated[AuthService, Depends(get_auth_service)],
+) -> dict[str, object]:
+    await auth_service.delete_current_user(token)
+    return {
+        "success": True,
+        "data": {
+            "deleted": True,
+        },
+    }
+
+
 @router.get("/check-email")
 async def check_email(
     email: Annotated[str, Query(min_length=3, max_length=255)],

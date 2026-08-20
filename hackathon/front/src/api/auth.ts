@@ -43,3 +43,10 @@ export function getCurrentUser(accessToken: string) {
     token: accessToken,
   })
 }
+
+export function deleteCurrentUser(accessToken: string) {
+  return apiRequest<ApiResponse<{ deleted: boolean }>>('/auth/me', {
+    method: 'DELETE',
+    token: accessToken,
+  })
+}

@@ -96,6 +96,14 @@ class AuthService:
         )
 
     async def get_current_user(self, access_token: str) -> UserRead:
+        user = await self._get_user_from_access_token(access_token)
+        return self._to_user_read(user)
+
+    async def delete_current_user(self, access_token: str) -> None:
+        user = await self._get_user_from_access_token(access_token)
+        await self.user_repository.delete(user)
+
+    async def _get_user_from_access_token(self, access_token: str) -> User:
         payload = decode_token(access_token)
         if payload.get("type") != "access":
             raise api_error(401, "UNAUTHORIZED", "Access token is required.")
@@ -109,7 +117,7 @@ class AuthService:
         user = await self.user_repository.get_by_id(user_id)
         if user is None:
             raise api_error(401, "UNAUTHORIZED", "User not found.")
-        return self._to_user_read(user)
+        return user
 
     async def check_email(self, email: str) -> dict[str, bool]:
         normalized_email = email.strip().lower()
