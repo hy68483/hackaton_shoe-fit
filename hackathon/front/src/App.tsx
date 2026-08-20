@@ -2407,6 +2407,9 @@ function MeasurePage() {
   );
   const [measurementSavedByBackend, setMeasurementSavedByBackend] =
     useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveSuccessNotice, setSaveSuccessNotice] = useState("");
+  const [showWhyModal, setShowWhyModal] = useState(false);
   const isLoggedIn = Boolean(localStorage.getItem(AUTH_ACCESS_TOKEN_KEY));
   const displayUserName = getDisplayUserName();
 
@@ -2583,6 +2586,26 @@ function MeasurePage() {
       }
     }
     setStep("result");
+  }
+
+  async function handleSaveResult(profile: FootProfile) {
+    setIsSaving(true);
+    try {
+      saveFootProfile(profile);
+      setFootProfile(profile);
+      await saveFootProfileToDatabase(profile);
+      setSaveSuccessNotice("발 프로필이 성공적으로 저장되었습니다.");
+      setTimeout(() => {
+        navigate("/account/foot-profile");
+      }, 700);
+    } catch {
+      setSaveSuccessNotice("발 프로필이 저장되었습니다.");
+      setTimeout(() => {
+        navigate("/account/foot-profile");
+      }, 700);
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   if (step === "login") {
@@ -3101,6 +3124,11 @@ function MeasurePage() {
       <MeasureFrame scroll>
         <MeasureBackButton onClick={() => setStep("fit")} />
         <div className="border-t-2 border-[#9d65ff]" />
+        {saveSuccessNotice && (
+          <div className="fixed top-12 left-1/2 z-50 -translate-x-1/2 rounded-full bg-[#191821] px-5 py-2.5 text-[12px] font-bold text-white shadow-xl">
+            ✓ {saveSuccessNotice}
+          </div>
+        )}
         <div className="px-4 pb-[142px] pt-[50px] text-center">
           <header>
             <p className="text-[17px] font-semibold leading-6 text-[#191821]">
@@ -3122,7 +3150,8 @@ function MeasurePage() {
             </div>
             <button
               type="button"
-              className="mx-auto mt-[8px] flex items-center justify-center gap-1 text-[9px] font-normal text-[#8a84d8]"
+              onClick={() => setShowWhyModal(true)}
+              className="mx-auto mt-[8px] flex items-center justify-center gap-1 text-[9px] font-normal text-[#8a84d8] hover:underline"
             >
               <span className="flex h-[10px] w-[10px] items-center justify-center rounded-full border border-[#8a84d8] text-[7px]">
                 ?
@@ -3143,10 +3172,18 @@ function MeasurePage() {
                   <button
                     key={size}
                     type="button"
+                    onClick={() => {
+                      const nextProfile = {
+                        ...resultProfile,
+                        recommendedSizeMm: size,
+                      };
+                      saveFootProfile(nextProfile);
+                      setFootProfile(nextProfile);
+                    }}
                     className={`flex flex-col items-center justify-center rounded-full text-center transition-all ${
                       active
-                        ? "bg-[#4640DE] text-white"
-                        : "text-[#6b5cff]"
+                        ? "bg-[#4640DE] text-white shadow-md shadow-[#4640DE]/20"
+                        : "text-[#6b5cff] hover:bg-[#eae6ff]"
                     }`}
                   >
                     <span className="text-[16px] font-semibold leading-none">
@@ -3272,26 +3309,69 @@ function MeasurePage() {
             </div>
           </section>
 
-          <div className="fixed inset-x-0 bottom-0 z-10 mx-auto max-w-[430px] bg-[#FBFAFF] px-4 pb-7 pt-4">
+          <div className="fixed inset-x-0 bottom-0 z-10 mx-auto max-w-[430px] border-t border-[#eceaf5] bg-[#FBFAFF] px-4 pb-7 pt-4">
             <button
               type="button"
-              onClick={() => {
-                saveFootProfile(resultProfile);
-                void saveFootProfileToDatabase(resultProfile);
-              }}
-              className="flex h-[54px] w-full items-center justify-center rounded-[16px] bg-[#4640DE] text-[15px] font-normal text-white"
+              disabled={isSaving}
+              onClick={() => void handleSaveResult(resultProfile)}
+              className="flex h-[54px] w-full items-center justify-center rounded-[16px] bg-[#4640DE] text-[15px] font-bold text-white shadow-lg shadow-[#4640DE]/20 transition-all active:scale-[0.99] disabled:opacity-70"
             >
-              {resultProfile.recommendedSizeMm}mm 사이즈로 저장하기
+              {isSaving
+                ? "저장 중..."
+                : `${resultProfile.recommendedSizeMm}mm 사이즈로 저장하기`}
             </button>
             <button
               type="button"
-              onClick={() => setStep("start")}
+              onClick={() => {
+                setMeasurementShots([]);
+                setMeasurementError("");
+                setMeasurementNotice("");
+                setStep("start");
+              }}
               className="mt-4 text-[12px] font-normal text-[#4640DE] underline"
             >
               다시 측정하기
             </button>
           </div>
         </div>
+
+        {showWhyModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-6">
+            <div className="w-full max-w-[340px] rounded-[18px] bg-white p-6 text-left shadow-xl">
+              <h3 className="text-[16px] font-black text-[#191821]">
+                왜 이 사이즈 인가요?
+              </h3>
+              <div className="mt-4 space-y-3 text-[12px] font-medium leading-5 text-[#555263]">
+                <p>
+                  • 실측 발 길이{" "}
+                  <strong className="text-[#4640DE]">
+                    {resultProfile.footLengthMm}mm
+                  </strong>
+                  에 보행 시 필요한 여유 공간(5~10mm)을 고려했습니다.
+                </p>
+                <p>
+                  • 발볼 너비{" "}
+                  <strong className="text-[#4640DE]">
+                    {resultProfile.footWidthMm}mm
+                  </strong>
+                  ({resultProfile.footWidthLabel})와 발등 높이를 종합 분석하여
+                  가장 편안한 착화감을 제공하는{" "}
+                  <strong className="text-[#4640DE]">
+                    {resultProfile.recommendedSizeMm}mm
+                  </strong>
+                  를 추천합니다.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowWhyModal(false)}
+                className="mt-6 flex h-11 w-full items-center justify-center rounded-[12px] bg-[#4640DE] text-[13px] font-bold text-white"
+              >
+                확인
+              </button>
+            </div>
+          </div>
+        )}
       </MeasureFrame>
     );
   }
@@ -3597,7 +3677,17 @@ function AccountPage() {
 
 function FootProfilePage() {
   const navigate = useNavigate();
-  const footProfile = loadFootProfile();
+  const [footProfile, setFootProfile] = useState<FootProfile | null>(() =>
+    loadFootProfile(),
+  );
+
+  function handleSizeChange(size: number) {
+    if (!footProfile) return;
+    const next = { ...footProfile, recommendedSizeMm: size };
+    saveFootProfile(next);
+    setFootProfile(next);
+    void saveFootProfileToDatabase(next);
+  }
 
   if (!footProfile) {
     return (
@@ -3713,10 +3803,11 @@ function FootProfilePage() {
           <button
             key={size}
             type="button"
-            className={`h-[58px] rounded-[10px] text-[11px] font-black ${
+            onClick={() => handleSizeChange(size)}
+            className={`h-[58px] rounded-[10px] text-[11px] font-black transition-all ${
               size === footProfile.recommendedSizeMm
-                ? "bg-[#4640DE] text-white"
-                : "bg-[#f0eefb] text-[#6b5cff]"
+                ? "bg-[#4640DE] text-white shadow-md shadow-[#4640DE]/20"
+                : "bg-[#f0eefb] text-[#6b5cff] hover:bg-[#eae6ff]"
             }`}
           >
             <span className="block text-[15px]">{size} mm</span>
