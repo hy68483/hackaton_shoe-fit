@@ -2407,6 +2407,8 @@ function MeasurePage() {
   );
   const [measurementSavedByBackend, setMeasurementSavedByBackend] =
     useState(false);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [saveProfileNotice, setSaveProfileNotice] = useState("");
   const isLoggedIn = Boolean(localStorage.getItem(AUTH_ACCESS_TOKEN_KEY));
   const displayUserName = getDisplayUserName();
 
@@ -2583,6 +2585,31 @@ function MeasurePage() {
       }
     }
     setStep("result");
+  }
+
+  async function handleSaveResult(profile: FootProfile) {
+    if (isSavingProfile) return;
+
+    setIsSavingProfile(true);
+    setSaveProfileNotice("");
+    try {
+      saveFootProfile(profile);
+      setFootProfile(profile);
+      if (!measurementSavedByBackend) {
+        await saveFootProfileToDatabase(profile);
+        setMeasurementSavedByBackend(true);
+      }
+      setSaveProfileNotice("발 프로필을 저장했어요.");
+      window.setTimeout(() => navigate("/account/foot-profile"), 500);
+    } catch (error) {
+      setSaveProfileNotice(
+        error instanceof Error
+          ? error.message
+          : "발 프로필을 저장하지 못했습니다.",
+      );
+    } finally {
+      setIsSavingProfile(false);
+    }
   }
 
   if (step === "login") {
@@ -3101,6 +3128,11 @@ function MeasurePage() {
       <MeasureFrame scroll>
         <MeasureBackButton onClick={() => setStep("fit")} />
         <div className="border-t-2 border-[#9d65ff]" />
+        {saveProfileNotice && (
+          <p className="fixed left-1/2 top-12 z-50 -translate-x-1/2 whitespace-nowrap rounded-full bg-[#191821] px-5 py-2.5 text-[12px] font-semibold text-white shadow-xl">
+            {saveProfileNotice}
+          </p>
+        )}
         <div className="px-4 pb-[142px] pt-[50px] text-center">
           <header>
             <p className="text-[17px] font-semibold leading-6 text-[#191821]">
@@ -3275,13 +3307,13 @@ function MeasurePage() {
           <div className="fixed inset-x-0 bottom-0 z-10 mx-auto max-w-[430px] bg-[#FBFAFF] px-4 pb-7 pt-4">
             <button
               type="button"
-              onClick={() => {
-                saveFootProfile(resultProfile);
-                void saveFootProfileToDatabase(resultProfile);
-              }}
-              className="flex h-[54px] w-full items-center justify-center rounded-[16px] bg-[#4640DE] text-[15px] font-normal text-white"
+              disabled={isSavingProfile}
+              onClick={() => void handleSaveResult(resultProfile)}
+              className="flex h-[54px] w-full items-center justify-center rounded-[16px] bg-[#4640DE] text-[15px] font-normal text-white disabled:opacity-60"
             >
-              {resultProfile.recommendedSizeMm}mm 사이즈로 저장하기
+              {isSavingProfile
+                ? "저장 중..."
+                : `${resultProfile.recommendedSizeMm}mm 사이즈로 저장하기`}
             </button>
             <button
               type="button"
