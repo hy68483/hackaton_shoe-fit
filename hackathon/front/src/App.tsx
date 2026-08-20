@@ -3960,9 +3960,10 @@ function SearchPage() {
         </Link>
         <label className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-full bg-white px-3 shadow-sm focus-within:ring-2 focus-within:ring-[#bdb6ff]">
           <input
-            type="search"
+            type="text"
             inputMode="search"
             enterKeyHint="search"
+            spellCheck={false}
             value={keyword}
             onChange={(event) => setKeyword(event.target.value)}
             className="min-w-0 flex-1 bg-transparent text-[11px] font-semibold text-[#1f1d28] outline-none placeholder:text-[#b0acbd]"
