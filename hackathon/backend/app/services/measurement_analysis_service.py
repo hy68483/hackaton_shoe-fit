@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 from uuid import UUID
 
@@ -55,10 +56,11 @@ class MeasurementAnalysisService:
 
         image_path = Path(measurement_image.original_key)
         image = cv2.imread(str(image_path))
-        analysis = self.measurement_service.analyze_foot(
+        analysis = await asyncio.to_thread(
+            self.measurement_service.analyze_foot,
             image,
-            point_x=payload.point_x,
-            point_y=payload.point_y,
+            payload.point_x,
+            payload.point_y,
             diagnostic_dir=image_path.parent / "diagnostics",
             diagnostic_stem=str(measurement_image.id),
         )
@@ -120,10 +122,11 @@ class MeasurementAnalysisService:
         for shot in payload.shots:
             image_path = Path(images_by_id[shot.image_id].original_key)
             image = cv2.imread(str(image_path))
-            analysis = self.measurement_service.analyze_foot(
+            analysis = await asyncio.to_thread(
+                self.measurement_service.analyze_foot,
                 image,
-                point_x=shot.point_x,
-                point_y=shot.point_y,
+                shot.point_x,
+                shot.point_y,
                 diagnostic_dir=image_path.parent / "diagnostics",
                 diagnostic_stem=str(shot.image_id),
             )
