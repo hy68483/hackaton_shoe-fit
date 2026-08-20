@@ -71,6 +71,7 @@ import recommendGelImage from "./assets/home/recommend-gel.png";
 import recommendUaImage from "./assets/home/recommend-ua.png";
 import recommendVomeroImage from "./assets/home/recommend-vomero.png";
 import runBannerImage from "./assets/home/run-banner.png";
+import shoeFitLogoImage from "./assets/home/shoe-fit-logo.png";
 import detailMainImage from "./assets/shop/detail-main.png";
 import detailThumb1Image from "./assets/shop/detail-thumb-1.png";
 import detailThumb2Image from "./assets/shop/detail-thumb-2.png";
@@ -118,6 +119,7 @@ const AUTH_USER_NAME_KEY = "shoefit.auth.userName";
 const CART_STORAGE_KEY = "shoefit.cart.items";
 const FOOT_PROFILE_STORAGE_KEY = "shoefit.footProfile";
 const WISHLIST_STORAGE_KEY = "shoefit.wishlist.productIds";
+const RECENT_SEARCH_STORAGE_KEY = "shoefit.search.recentKeywords";
 
 type ShopProduct = {
   id: string;
@@ -2037,9 +2039,14 @@ function HomeHeader() {
     <header className="flex h-[61px] items-center gap-3">
       <Link
         to="/home"
-        className="shrink-0 text-[28px] font-black tracking-[-0.02em] text-[#111111]"
+        className="flex h-[46px] w-[98px] shrink-0 items-center"
+        aria-label="shoe-fit 홈"
       >
-        shoe-fit
+        <img
+          src={shoeFitLogoImage}
+          alt="shoe-fit"
+          className="h-auto w-full object-contain"
+        />
       </Link>
       <Link
         to="/search"
@@ -2143,7 +2150,7 @@ function CategoryScroller() {
           className="flex w-[82px] shrink-0 flex-col items-center gap-2"
         >
           <span
-            className={`flex h-[60px] w-[60px] items-center justify-center rounded-full ${
+            className={`flex h-[60px] w-[60px] shrink-0 items-center justify-center rounded-full ${
               category.image ? "bg-[#f5f3ff]" : "bg-[#c9c0f8]"
             }`}
           >
@@ -3909,12 +3916,16 @@ function ExplorePage() {
 function SearchPage() {
   const navigate = useNavigate();
   const [keyword, setKeyword] = useState("");
-  const [recentSearches, setRecentSearches] = useState([
-    "플랫슈즈",
-    "레인부츠",
-    "러닝화",
-    "슬리퍼",
-  ]);
+  const [recentSearches, setRecentSearches] = useState<string[]>(() => {
+    const savedSearches = localStorage.getItem(RECENT_SEARCH_STORAGE_KEY);
+    if (!savedSearches) return [];
+
+    try {
+      return JSON.parse(savedSearches) as string[];
+    } catch {
+      return [];
+    }
+  });
   const popular = ["러닝화", "스니커즈", "운동화", "샌들", "로퍼"];
   const rankings = [
     "러닝화",
@@ -3933,12 +3944,17 @@ function SearchPage() {
     const normalizedKeyword = searchKeyword.trim();
     if (!normalizedKeyword) return;
 
-    setRecentSearches((current) =>
-      [
+    setRecentSearches((current) => {
+      const nextSearches = [
         normalizedKeyword,
         ...current.filter((item) => item !== normalizedKeyword),
-      ].slice(0, 6),
-    );
+      ].slice(0, 6);
+      localStorage.setItem(
+        RECENT_SEARCH_STORAGE_KEY,
+        JSON.stringify(nextSearches),
+      );
+      return nextSearches;
+    });
     navigate(`/explore?q=${encodeURIComponent(normalizedKeyword)}`);
   }
 
@@ -3995,7 +4011,10 @@ function SearchPage() {
           <h2 className="text-[12px] font-black">최근 검색어</h2>
           <button
             type="button"
-            onClick={() => setRecentSearches([])}
+            onClick={() => {
+              localStorage.removeItem(RECENT_SEARCH_STORAGE_KEY);
+              setRecentSearches([]);
+            }}
             className="text-[10px] font-bold text-[#8a8695]"
           >
             전체 삭제
