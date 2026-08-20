@@ -16,7 +16,8 @@ def main() -> int:
     args = parser.parse_args()
     client = ApiClient(args.base_url.rstrip("/"))
 
-    email = f"smoke_{uuid4().hex[:10]}@test.com"
+    login_id = f"smoke_{uuid4().hex[:10]}"
+    email = f"{login_id}@test.com"
     password = "testtest123"
 
     health = client.get("/health")
@@ -26,13 +27,13 @@ def main() -> int:
 
     signup = client.post(
         "/auth/signup",
-        {"email": email, "password": password, "name": "Smoke Test"},
+        {"login_id": login_id, "email": email, "password": password, "name": "Smoke Test"},
         expected_status=201,
     )
     assert_success("signup", signup)
     passed("signup")
 
-    login = client.post("/auth/login", {"email": email, "password": password})
+    login = client.post("/auth/login", {"login_id": login_id, "password": password})
     assert_success("login", login)
     access_token = login["data"]["access_token"]
     refresh_token = login["data"]["refresh_token"]
