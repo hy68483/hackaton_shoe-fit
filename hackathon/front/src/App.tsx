@@ -455,7 +455,9 @@ const detailProductOverrides: Record<string, Partial<ShopProduct>> = {
   },
 };
 
-const productSizes = ["210", "215", "220", "225", "230"];
+const productSizes = Array.from({ length: 19 }, (_, index) =>
+  String(210 + index * 5),
+);
 
 const defaultCartItems: CartItem[] = [];
 
@@ -1260,16 +1262,19 @@ function SignupPasswordPage() {
       setSubmitting(true);
       setSubmitError("");
       const normalizedLoginId = normalizeLoginId(loginId);
-      const response = await signup({
+      await signup({
         login_id: getSignupLoginId(normalizedLoginId),
         email: isEmailLike(normalizedLoginId) ? normalizedLoginId : null,
         password,
         name,
       });
-      localStorage.setItem(AUTH_ACCESS_TOKEN_KEY, response.data.access_token);
-      localStorage.setItem(AUTH_REFRESH_TOKEN_KEY, response.data.refresh_token);
-      localStorage.setItem(AUTH_LOGIN_ID_KEY, normalizedLoginId);
-      localStorage.setItem(AUTH_USER_NAME_KEY, response.data.user.name);
+      localStorage.removeItem(AUTH_ACCESS_TOKEN_KEY);
+      localStorage.removeItem(AUTH_REFRESH_TOKEN_KEY);
+      localStorage.removeItem(AUTH_LOGIN_ID_KEY);
+      localStorage.removeItem(AUTH_USER_NAME_KEY);
+      localStorage.removeItem(CART_STORAGE_KEY);
+      localStorage.removeItem(FOOT_PROFILE_STORAGE_KEY);
+      localStorage.removeItem(WISHLIST_STORAGE_KEY);
       navigate("/signup/complete");
     } catch (error) {
       setSubmitError(
@@ -1968,11 +1973,11 @@ function HomePage() {
         to="/measure"
         className="mt-[22px] block h-[183px] overflow-hidden rounded-[14px] bg-[#38325f] text-white shadow-lg shadow-[#4640DE]/18"
       >
-        <div className="flex h-[64px] flex-col items-center justify-center bg-[#6860ee] px-4 text-center">
+        <div className="flex h-[64px] flex-col items-center justify-start bg-[#6860ee] px-4 pt-[18px] text-center">
           <p className="text-[21px] font-bold leading-none text-white">
-            30초 촬영으로 내 발 추천받기
+            30초 촬영으로 내 발 측정받기
           </p>
-          <p className="mt-3 text-[12px] font-normal text-white">
+          <p className="mt-1.5 text-[12px] font-normal text-white">
             발 사진 한 장으로 브랜드별 맞춤 사이즈를 추천해 드려요.
           </p>
         </div>
@@ -2028,8 +2033,6 @@ function HomePage() {
 }
 
 function HomeHeader() {
-  const navigate = useNavigate();
-
   return (
     <header className="flex h-[61px] items-center gap-3">
       <Link
@@ -2038,17 +2041,16 @@ function HomeHeader() {
       >
         shoe-fit
       </Link>
-      <button
-        type="button"
-        onClick={() => navigate("/search")}
-        className="flex h-[46px] min-w-0 flex-1 items-center gap-2 rounded-full bg-[#f0eefb] px-4 text-left"
+      <Link
+        to="/search"
+        className="relative z-10 flex h-[46px] min-w-0 flex-1 items-center gap-2 rounded-full bg-[#f0eefb] px-4 text-left"
         aria-label="상품 검색"
       >
         <Search size={20} className="shrink-0 text-[#9d98d9]" />
         <span className="min-w-0 flex-1 text-[15px] font-semibold text-[#aaa6c7]">
           브랜드, 상품명 검색
         </span>
-      </button>
+      </Link>
       <Link
         to="/cart"
         className="flex h-[46px] w-[46px] shrink-0 items-center justify-center rounded-full bg-[#c9c0f8] text-white"
@@ -2363,9 +2365,11 @@ function HomeTopButton({
   className?: string;
   light?: boolean;
 }) {
+  const target = localStorage.getItem(AUTH_ACCESS_TOKEN_KEY) ? "/home" : "/";
+
   return (
     <Link
-      to="/home"
+      to={target}
       className={className}
       aria-label="홈으로 이동"
     >
@@ -3723,7 +3727,10 @@ function WishlistPage() {
 }
 
 function ExplorePage() {
-  const [keyword, setKeyword] = useState("");
+  const location = useLocation();
+  const [keyword, setKeyword] = useState(
+    () => new URLSearchParams(location.search).get("q") ?? "",
+  );
   const normalizedKeyword = keyword.trim().toLowerCase();
   const hasSearch = normalizedKeyword.length > 0;
   const searchResults = useMemo(() => {
@@ -3900,6 +3907,14 @@ function ExplorePage() {
 }
 
 function SearchPage() {
+  const navigate = useNavigate();
+  const [keyword, setKeyword] = useState("");
+  const [recentSearches, setRecentSearches] = useState([
+    "플랫슈즈",
+    "레인부츠",
+    "러닝화",
+    "슬리퍼",
+  ]);
   const popular = ["러닝화", "스니커즈", "운동화", "샌들", "로퍼"];
   const rankings = [
     "러닝화",
@@ -3914,9 +3929,28 @@ function SearchPage() {
     "등산화",
   ];
 
+  function submitSearch(searchKeyword = keyword) {
+    const normalizedKeyword = searchKeyword.trim();
+    if (!normalizedKeyword) return;
+
+    setRecentSearches((current) =>
+      [
+        normalizedKeyword,
+        ...current.filter((item) => item !== normalizedKeyword),
+      ].slice(0, 6),
+    );
+    navigate(`/explore?q=${encodeURIComponent(normalizedKeyword)}`);
+  }
+
   return (
     <section className="px-3 pb-5 pt-1">
-      <div className="flex h-11 items-center gap-2">
+      <form
+        className="flex h-11 items-center gap-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          submitSearch();
+        }}
+      >
         <Link
           to="/home"
           className="flex h-9 w-9 items-center justify-start"
@@ -3924,38 +3958,58 @@ function SearchPage() {
         >
           <ChevronLeft size={24} />
         </Link>
-        <label className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-full bg-white px-3 shadow-sm">
-          <span className="min-w-0 flex-1 text-[11px] font-semibold text-[#b0acbd]">
-            오늘 가장 많이 찾는 신발은?
-          </span>
-          <X size={14} className="text-[#c0bcd0]" />
+        <label className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-full bg-white px-3 shadow-sm focus-within:ring-2 focus-within:ring-[#bdb6ff]">
+          <input
+            type="search"
+            inputMode="search"
+            enterKeyHint="search"
+            value={keyword}
+            onChange={(event) => setKeyword(event.target.value)}
+            className="min-w-0 flex-1 bg-transparent text-[11px] font-semibold text-[#1f1d28] outline-none placeholder:text-[#b0acbd]"
+            placeholder="오늘 가장 많이 찾는 신발은?"
+            aria-label="검색어"
+          />
+          {keyword && (
+            <button
+              type="button"
+              onClick={() => setKeyword("")}
+              className="flex h-6 w-6 shrink-0 items-center justify-center text-[#c0bcd0]"
+              aria-label="검색어 지우기"
+            >
+              <X size={14} />
+            </button>
+          )}
         </label>
         <button
           className="flex h-9 w-9 items-center justify-center rounded-full bg-[#efeaff] text-[#8b84e6]"
-          type="button"
+          type="submit"
+          aria-label="검색"
         >
           <Search size={15} />
         </button>
-      </div>
+      </form>
 
       <section className="mt-5">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-[12px] font-black">최근 검색어</h2>
           <button
             type="button"
+            onClick={() => setRecentSearches([])}
             className="text-[10px] font-bold text-[#8a8695]"
           >
             전체 삭제
           </button>
         </div>
         <div className="flex flex-wrap gap-2">
-          {["플랫슈즈", "레인부츠", "러닝화", "슬리퍼"].map((item) => (
-            <span
+          {recentSearches.map((item) => (
+            <button
               key={item}
+              type="button"
+              onClick={() => submitSearch(item)}
               className="rounded-full bg-[#f4f1ff] px-3 py-2 text-[10px] font-bold text-[#5c56bd]"
             >
               {item}
-            </span>
+            </button>
           ))}
         </div>
       </section>
@@ -3964,12 +4018,14 @@ function SearchPage() {
         <h2 className="mb-3 text-[12px] font-black">오늘 뜨는</h2>
         <div className="flex flex-wrap gap-2">
           {popular.map((item) => (
-            <span
+            <button
               key={item}
+              type="button"
+              onClick={() => submitSearch(item)}
               className="rounded-full bg-white px-3 py-2 text-[10px] font-bold text-[#777482] shadow-sm"
             >
               {item}
-            </span>
+            </button>
           ))}
         </div>
       </section>
@@ -3979,7 +4035,9 @@ function SearchPage() {
         <ol className="grid grid-cols-2 gap-x-6 gap-y-2">
           {rankings.map((item, index) => (
             <li key={item} className="text-[11px] font-semibold text-[#3b3944]">
-              {index + 1}. <span className="ml-1">{item}</span>
+              <button type="button" onClick={() => submitSearch(item)}>
+                {index + 1}. <span className="ml-1">{item}</span>
+              </button>
             </li>
           ))}
         </ol>
