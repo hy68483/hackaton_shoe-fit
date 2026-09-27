@@ -98,6 +98,8 @@ Use a custom API base URL if the server runs on another port:
 python scripts/smoke_test.py --base-url http://127.0.0.1:8001/api/v1
 ```
 
+The smoke test covers auth, refresh token, product list, foot profile, recommendations, measurement session creation, image upload, image validation, analysis stub response, and measurement result save/read.
+
 ### Promote Admin User
 
 Admin catalog APIs require a user with `role=ADMIN`. Sign up normally first, then run:
