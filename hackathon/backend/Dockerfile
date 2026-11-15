@@ -14,6 +14,9 @@ RUN apt-get update \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# SQLAlchemy 2.1 installs greenlet only when the asyncio extra is requested.
+RUN pip install --no-cache-dir "sqlalchemy[asyncio]"
+
 COPY app ./app
 COPY scripts ./scripts
 

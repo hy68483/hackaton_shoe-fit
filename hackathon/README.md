@@ -2,6 +2,24 @@
 
 Mobile web shoe shopping project with AI-assisted foot measurement and shoe size recommendation.
 
+## Architecture
+
+```text
+React (Vercel)
+    -> HTTPS
+Nginx (Gabia Cloud)
+    -> FastAPI
+    -> PostgreSQL
+    -> SAM + OpenCV measurement pipeline
+```
+
+The production backend is composed with Docker Compose:
+
+- `nginx`: TLS termination and reverse proxy
+- `backend`: FastAPI, SAM, and OpenCV
+- `db`: PostgreSQL 16
+- `certbot`: Let's Encrypt certificate issuance and renewal
+
 ## Backend
 
 Required Python: 3.12.x
@@ -32,7 +50,11 @@ backend\.venv\Scripts\activate.bat
 
 ```powershell
 pip install -r backend/requirements.txt
+pip install "sqlalchemy[asyncio]"
 ```
+
+The Docker image installs the SQLAlchemy asyncio extra separately so existing
+heavy AI dependency layers can remain cached during container rebuilds.
 
 ### Environment Variables
 
@@ -170,7 +192,7 @@ be recovered, the service safely falls back to the original planar result.
 
 ## Deployment Checklist
 
-Before deploying, merge the working branch into `develop` and deploy from the branch agreed by the team.
+Merge the verified working branch into `main` before deploying.
 
 Frontend:
 
@@ -180,16 +202,17 @@ npm install
 npm run build
 ```
 
-Deploy `front/dist` to the static web server. Set `VITE_API_BASE_URL` before building so the deployed frontend calls the real backend, not `127.0.0.1`.
+Vercel builds and deploys the frontend from `main`. Set `VITE_API_BASE_URL`
+before building so the deployed frontend calls the public HTTPS backend, not
+`127.0.0.1`.
 
-Backend:
+Backend with Docker Compose:
 
-```powershell
-cd backend
-py -3.12 -m venv .venv
-.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+```bash
+git pull --ff-only origin main
+docker compose up -d --build backend nginx
+docker compose ps
+curl https://your-api-domain.com/api/v1/health
 ```
 
 Production `backend/.env` must include:
@@ -210,6 +233,24 @@ Do not commit `.env`, `.venv`, `backend/model/`, `.pth`, or `.pt` files.
 ## Frontend
 
 The React mobile web frontend is in `front/`.
+
+### Source Structure
+
+`App.tsx` owns route composition only. Route components are loaded lazily and
+organized by domain under `front/src/features/`:
+
+```text
+features/
+  account/       account, foot profile, and recommendations
+  admin/         admin shell and catalog management
+  auth/          login and signup flows
+  measurement/   capture, validation, analysis, and result UI
+  shared/        shared layout and browser storage helpers
+  shop/          home, search, products, wishlist, and cart
+```
+
+This keeps feature data and UI close together while preventing unrelated route
+code from being included in the initial JavaScript bundle.
 
 ### Install Dependencies
 
