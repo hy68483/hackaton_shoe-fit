@@ -218,7 +218,12 @@ curl https://your-api-domain.com/api/v1/health
 The backend image installs the pinned CPU-only PyTorch wheels. This avoids
 downloading CUDA runtime packages on CPU-only hosts such as the current EC2
 deployment. Before enabling HTTPS, copy `nginx/default.ssl.conf.example` to
-`nginx/default.conf` and replace every `YOUR_HOSTNAME` with the API hostname.
+the ignored `nginx/default.ssl.conf`, replace every `YOUR_HOSTNAME` with the
+API hostname, and add this to the root `.env`:
+
+```text
+NGINX_CONFIG_PATH=./nginx/default.ssl.conf
+```
 
 Production `backend/.env` must include:
 

@@ -12,3 +12,4 @@ __pycache__/
 # local/generated files
 backend/output/
 backend/tests/assets/private/
+nginx/default.ssl.conf
