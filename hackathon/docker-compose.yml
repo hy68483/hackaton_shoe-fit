@@ -52,6 +52,7 @@ services:
   certbot:
     image: certbot/certbot:v2.11.0
     container_name: shoe-fit-certbot
+    profiles: ["tools"]
     volumes:
       - certbot_www:/var/www/certbot
       - certbot_conf:/etc/letsencrypt
