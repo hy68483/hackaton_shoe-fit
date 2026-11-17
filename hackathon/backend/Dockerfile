@@ -12,6 +12,10 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
+RUN pip install --no-cache-dir \
+    --index-url https://download.pytorch.org/whl/cpu \
+    "torch==2.15.0" \
+    "torchvision==0.29.2"
 RUN pip install --no-cache-dir -r requirements.txt
 
 # SQLAlchemy 2.1 installs greenlet only when the asyncio extra is requested.
