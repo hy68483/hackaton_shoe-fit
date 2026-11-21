@@ -1,6 +1,7 @@
 .env
 .venv/
 venv/
+.venv-loadtest/
 __pycache__/
 *.pyc
 *.pyo
@@ -13,3 +14,5 @@ __pycache__/
 backend/output/
 backend/tests/assets/private/
 nginx/default.ssl.conf
+loadtest/results/
+loadtest/.env

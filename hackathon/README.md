@@ -7,7 +7,7 @@ Mobile web shoe shopping project with AI-assisted foot measurement and shoe size
 ```text
 React (Vercel)
     -> HTTPS
-Nginx (Gabia Cloud)
+Nginx (AWS EC2)
     -> FastAPI
     -> PostgreSQL
     -> SAM + OpenCV measurement pipeline
@@ -19,6 +19,12 @@ The production backend is composed with Docker Compose:
 - `backend`: FastAPI, SAM, and OpenCV
 - `db`: PostgreSQL 16
 - `certbot`: Let's Encrypt certificate issuance and renewal
+
+## Load Testing
+
+The Locust scenario is in [`loadtest/`](loadtest/). The first deployed API
+baseline and its limitations are documented in
+[`docs/load-test-baseline.md`](docs/load-test-baseline.md).
 
 ## Backend
 
