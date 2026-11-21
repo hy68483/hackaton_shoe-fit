@@ -22,9 +22,28 @@ The production backend is composed with Docker Compose:
 
 ## Load Testing
 
-The Locust scenario is in [`loadtest/`](loadtest/). The first deployed API
-baseline and its limitations are documented in
-[`docs/load-test-baseline.md`](docs/load-test-baseline.md).
+The deployed API was tested from Korea against the Sydney EC2 instance with
+Locust 2.47.0. Each virtual user logged in once and repeatedly called the
+health, product, brand, and authenticated current-user endpoints.
+
+| Concurrent users | Duration | Requests | Failures | Throughput | Average | p95 |
+|---:|---:|---:|---:|---:|---:|---:|
+| 5 | 1 min | 230 | 0 | 3.87 req/s | 251 ms | 240 ms |
+| 10 | 1 min | 466 | 0 | 7.81 req/s | 252 ms | 250 ms |
+| 20 | 1 min | 925 | 0 | 15.50 req/s | 275 ms | 500 ms |
+
+At 20 users, the backend used 4.71% CPU and about 78 MiB of memory. No 5xx,
+traceback, or OOM event occurred. Read requests had a median near 230 ms;
+login averaged 1.32 seconds because of password hashing.
+
+These numbers are a baseline rather than a capacity claim: product and brand
+payloads were empty, the run lasted one minute per stage, and SAM/OpenCV image
+analysis was intentionally excluded. The next stages are a realistic-data
+soak test and isolated AI concurrency tests at 1, 2, and 3 users.
+
+- Reproducible Locust scenario and commands: [`loadtest/`](loadtest/)
+- Full environment, interpretation, and limitations:
+  [`docs/load-test-baseline.md`](docs/load-test-baseline.md)
 
 ## Backend
 
