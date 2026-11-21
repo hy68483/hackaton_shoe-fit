@@ -44,6 +44,7 @@ Let's Encrypt 인증서로 HTTPS를 제공합니다.
 ## 문서 및 소스
 
 - [프로젝트 실행 및 배포 문서](hackathon/README.md)
+- [데이터베이스 ERD](hackathon/docs/database-er-diagram.md)
 - [Locust 시나리오와 실행 방법](hackathon/loadtest/README.md)
 - [부하 테스트 상세 보고서](hackathon/docs/load-test-baseline.md)
 - [프로젝트 소스](hackathon/)

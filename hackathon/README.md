@@ -47,6 +47,8 @@ tests at 1, 2, and 3 users.
 - Reproducible Locust scenario and commands: [`loadtest/`](loadtest/)
 - Full environment, interpretation, and limitations:
   [`docs/load-test-baseline.md`](docs/load-test-baseline.md)
+- Database tables and relationships:
+  [`docs/database-er-diagram.md`](docs/database-er-diagram.md)
 
 ## Backend
 
