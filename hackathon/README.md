@@ -23,23 +23,26 @@ The production backend is composed with Docker Compose:
 ## Load Testing
 
 The deployed API was tested from Korea against the Sydney EC2 instance with
-Locust 2.47.0. Each virtual user logged in once and repeatedly called the
-health, product, brand, and authenticated current-user endpoints.
+Locust 2.47.0. Each virtual user logged in once, waited 0.5-1.5 seconds
+between requests, and repeatedly called products (40%), the authenticated
+current-user endpoint (30%), brands (20%), and health (10%). Users spawned
+at one per second and each stage ran independently for three minutes.
 
 | Concurrent users | Duration | Requests | Failures | Throughput | Average | p95 |
 |---:|---:|---:|---:|---:|---:|---:|
-| 5 | 1 min | 230 | 0 | 3.87 req/s | 251 ms | 240 ms |
-| 10 | 1 min | 466 | 0 | 7.81 req/s | 252 ms | 250 ms |
-| 20 | 1 min | 925 | 0 | 15.50 req/s | 275 ms | 500 ms |
+| 5 | 3 min | 725 | 0 | 4.05 req/s | 237 ms | 240 ms |
+| 10 | 3 min | 1,417 | 0 | 7.89 req/s | 243 ms | 250 ms |
+| 20 | 3 min | 2,757 | 0 | 15.34 req/s | 242 ms | 240 ms |
 
-At 20 users, the backend used 4.71% CPU and about 78 MiB of memory. No 5xx,
-traceback, or OOM event occurred. Read requests had a median near 230 ms;
-login averaged 1.32 seconds because of password hashing.
+At 20 users, the observed backend peak was 5.50% CPU and 77.59 MiB of
+memory. No 5xx, traceback, or OOM event occurred. Read requests had a median
+near 230-240 ms; login averaged 958 ms because of password hashing.
 
 These numbers are a baseline rather than a capacity claim: product and brand
-payloads were empty, the run lasted one minute per stage, and SAM/OpenCV image
-analysis was intentionally excluded. The next stages are a realistic-data
-soak test and isolated AI concurrency tests at 1, 2, and 3 users.
+payloads were empty, the run lasted three minutes per stage, and SAM/OpenCV
+image analysis was intentionally excluded. The next stages are a
+realistic-data soak test of at least ten minutes and isolated AI concurrency
+tests at 1, 2, and 3 users.
 
 - Reproducible Locust scenario and commands: [`loadtest/`](loadtest/)
 - Full environment, interpretation, and limitations:
